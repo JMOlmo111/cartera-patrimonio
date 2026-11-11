@@ -118,7 +118,7 @@ main { padding: 14px 16px; max-width: 1180px; margin: 0 auto; outline: none; }
 
 /* Próximamente (sin datos simulados) */
 .proximamente { border-style: dashed; background: var(--superficie-2); box-shadow: none; }
-.proximamente .fase { display: inline-block; font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; background: var(--acento-suave); color: var(--acento); }
+.fase { display: inline-block; font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; background: var(--acento-suave); color: var(--acento); }
 
 /* Botones y formularios */
 .btn {
@@ -162,6 +162,7 @@ input, select, textarea {
 
 /* Indicadores de mercado */
 .indicadores { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); }
+.indicadores.compacto { grid-template-columns: repeat(auto-fill, minmax(min(100%, 140px), 1fr)); }
 .ind { padding: 12px; border-radius: 12px; background: var(--superficie-2); min-width: 0; }
 .ind .nombre { font-size: .8rem; color: var(--texto-2); }
 .ind .valor { font-size: 1.25rem; font-weight: 700; margin: 2px 0; }
