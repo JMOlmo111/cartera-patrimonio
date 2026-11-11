@@ -1,7 +1,7 @@
 /* Service worker · Cartera Patrimonio
    Guarda la "carcasa" de la app para que abra rápido y sin conexión.
    NUNCA guarda las respuestas del servidor (tus datos financieros). */
-const VERSION = 'cp-v1.0.0';
+const VERSION = 'cp-v1.1.0';
 const CARCASA = [
   './', './index.html', './css/estilos.css', './js/app.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',
