@@ -401,6 +401,41 @@
       <p class="suave">Volumen de negociación: no se utiliza, porque no existe para el oro ni para las divisas y en los ETF europeos se reparte entre varias bolsas.</p>`);
   }
 
+  /* ================= Informes (Fase 7) ================= */
+  function htmlInforme(inf) {
+    if (!inf) return '';
+    return `<div class="informe">
+      <div class="decision"><div class="etq">Mi decisión de inversión de hoy</div>
+        <div class="tit">${esc(inf.decision.titulo)}</div>
+        ${inf.decision.parrafos.map(p => `<p>${esc(p)}</p>`).join('')}</div>
+      ${inf.secciones.map(sec => `<h3>${esc(sec.titulo)}</h3>${sec.parrafos.filter(Boolean).map(p => `<p>${esc(p)}</p>`).join('')}`).join('')}
+      <p class="suave">Generado el ${fmtFechaHora(inf.fecha)}. Fuentes: ${inf.fuentes.map(esc).join(' · ')}. ${esc(inf.aviso)}</p>
+    </div>`;
+  }
+
+  function tarjetaDecision(d) {
+    const inf = d.informes && d.informes.ultimo;
+    if (!inf) return '';
+    return `<article class="tarjeta ancho decision-tarjeta">
+      <div class="etq">Mi decisión de inversión de hoy</div>
+      <div class="tit">${esc(inf.decision.titulo)}</div>
+      <p class="suave">${esc(inf.titulo)} · <button class="enlace" data-ir="informes">Leer el informe completo</button></p>
+    </article>`;
+  }
+
+  function tarjetaInformes(d) {
+    const inf = d.informes || { lista: [] };
+    const otros = inf.lista.slice(1, 15);
+    return `<article class="tarjeta ancho">
+      <h2>Informes ${inf.ultimo ? '' : ''}<button class="btn pequeno" id="btn-generar-informe">Generar ahora</button></h2>
+      ${inf.ultimo ? `<h3 style="margin-top:0">${esc(inf.ultimo.titulo)}</h3>${htmlInforme(inf.ultimo)}`
+        : '<p class="vacio">Aún no hay informes. El primero llegará el próximo día laborable a las 8:30, o pulsa «Generar ahora».</p>'}
+      ${otros.length ? `<h3>Informes anteriores</h3><div class="semaforo">${otros.map(x => `<button class="fila-sem" data-informe="${esc(x.id)}">
+          <span class="luz ${x.tipo === 'diario' ? 'amarillo' : 'verde'}" aria-hidden="true"></span>
+          <span class="fs-nombre">${esc(x.titulo)}<small>${esc(x.decision)}</small></span><span></span></button>`).join('')}</div>` : ''}
+    </article>`;
+  }
+
   /* ================= PANTALLA 1 · MI PATRIMONIO ================= */
   function vistaPatrimonio(el, d) {
     const c = d.cartera;
@@ -423,6 +458,8 @@
         </div>
         ${c.rentabilidad_anualizada === null && c.aviso_anualizada ? `<p class="suave" style="margin-top:8px;font-size:.78rem">Rentabilidad anualizada: ${esc(c.aviso_anualizada)}</p>` : ''}`}
       </article>
+
+      ${tarjetaDecision(d)}
 
       ${avisosPerfil || avisosPrecio.length ? `<article class="tarjeta ancho"><h2>Para tener en cuenta</h2>${avisosPerfil}${avisosPrecio.join('')}</article>` : ''}
 
@@ -1208,15 +1245,21 @@
 
   function vistaInformes(el, d) {
     el.innerHTML = `
+      ${tarjetaInformes(d)}
       ${tarjetaPerfil(d)}
       ${tarjetaSimulador(d)}
-      ${bloqueProximamente('Informe diario y «Mi decisión de inversión de hoy»', 'Fase 7', 'Cada mañana recibirás por correo y Telegram un informe que responde a las 8 preguntas de la memoria del proyecto y termina con una recomendación clara (o con un «hoy no hay una oportunidad suficientemente justificada»).')}
+
       ${bloqueProximamente('Asesor financiero conversacional', 'Fase 8', 'Podrás preguntarle cualquier cosa («¿Es buen momento para comprar oro?», «¿Qué pasa si la bolsa cae un 20 %?») y te responderá con los datos reales de la app, citando fuentes y separando hechos, estimaciones y opiniones.')}
       <article class="tarjeta ancho"><h2>Aviso importante</h2>
         <p class="suave">Esta aplicación es una herramienta informativa y analítica de uso personal. No es un asesor financiero regulado ni ejecuta operaciones. Las rentabilidades pasadas no garantizan rentabilidades futuras.</p></article>
     `;
     document.getElementById('f-sim').addEventListener('submit', ev => { ev.preventDefault(); ejecutarSimulacion(d); });
     document.getElementById('btn-editar-perfil').addEventListener('click', modalAjustes);
+    document.getElementById('btn-generar-informe').addEventListener('click', async ev => {
+      ev.target.disabled = true; ev.target.textContent = 'Generando…';
+      try { await cargar('generarInforme', { tipo: 'diario' }, 'Informe generado'); }
+      catch (e) { toast(e.message); ev.target.disabled = false; ev.target.textContent = 'Generar ahora'; }
+    });
     ejecutarSimulacion(d);
   }
 
@@ -1423,6 +1466,7 @@
             <span class="ayuda">Telegram: ${estado.datos && estado.datos.alertas && estado.datos.alertas.telegram ? 'conectado ✔' : 'no conectado'}.</span></label>
         </div>
         <button class="btn" type="button" id="btn-prueba-alertas">Enviar mensaje de prueba</button>
+        <label>Informe diario (8:30), semanal y mensual<select name="canal_informe">${['Correo + Telegram breve', 'Solo correo', 'Solo en la app'].map(t => `<option ${String(cfg.canal_informe || 'Correo + Telegram breve') === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
         <h3>Conexión</h3>
         <label>Dirección de la aplicación web<input name="url" type="url" value="${esc(con.url || '')}" required></label>
         <label>Código de acceso<input name="token" type="password" value="${esc(con.token || '')}" required minlength="20" autocomplete="off"></label>
@@ -1434,7 +1478,7 @@
           <button class="btn" type="button" id="btn-analisis">Actualizar análisis ahora</button>
           <button class="btn peligro" type="button" id="btn-desconectar">Olvidar este dispositivo</button>
         </div>
-        <p class="suave">Versión de la app: 1.4.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
+        <p class="suave">Versión de la app: 1.5.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
       </form>`, cuerpo => {
       const f = $('#f-ajustes', cuerpo);
       const suma = () => {
@@ -1455,7 +1499,7 @@
           if (Math.abs(suma() - 100) > 0.01) { $('.error', f).textContent = 'Los pesos objetivo deben sumar 100 %.'; return; }
           const cfgNueva = {};
           ['aportacion_mensual', 'capital_inicial', 'edad', 'horizonte_anios', 'fondo_emergencia', 'gastos_mensuales', 'meses_colchon',
-           'edad_jubilacion', 'tolerancia', 'aportacion_extra_anual', 'retiro_mensual', 'frecuencia_alertas', 'canal_alertas'].forEach(k => { cfgNueva[k] = d[k]; });
+           'edad_jubilacion', 'tolerancia', 'aportacion_extra_anual', 'retiro_mensual', 'frecuencia_alertas', 'canal_alertas', 'canal_informe'].forEach(k => { cfgNueva[k] = d[k]; });
           cats.forEach(c => { cfgNueva['obj_' + c.id] = d['obj_' + c.id]; });
           enviarFormulario(f, 'guardarConfig', cfgNueva, 'Ajustes guardados');
         } else {
@@ -1553,7 +1597,16 @@
       if (!estado.datos) return;
       const s = ev.target.closest('[data-senal]');
       if (s) { modalSenal(s.dataset.senal); return; }
-      if (ev.target.closest('[data-metodologia]')) modalMetodologia();
+      if (ev.target.closest('[data-metodologia]')) { modalMetodologia(); return; }
+      const ir = ev.target.closest('[data-ir]');
+      if (ir) { irA(ir.dataset.ir); return; }
+      const inf = ev.target.closest('[data-informe]');
+      if (inf) {
+        abrirModal('Informe', '<div class="esqueleto"></div>');
+        api('leerInforme', { id: inf.dataset.informe })
+          .then(r => abrirModal(r.titulo, htmlInforme(r)))
+          .catch(e => abrirModal('Informe', `<p class="error">${esc(e.message)}</p>`));
+      }
     });
     $('#btn-refrescar').addEventListener('click', () => { if (estado.conexion) cargar('resumen', null, 'Datos actualizados').catch(() => {}); });
 
