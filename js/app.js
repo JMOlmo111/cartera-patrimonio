@@ -177,7 +177,7 @@
       <li><span class="punto" style="background:${esc(r.color)}"></span>
       <div>${esc(r.nombre)}<small>${r.productos && r.productos.length ? 'En tu cartera: ' + r.productos.map(esc).join(', ') : 'Aún no tienes ningún producto en esta categoría'}</small></div>
       <strong class="num">${fmtEur(r.importe, 0)}</strong></li>`).join('')}</ul>
-      <p class="suave" style="margin-top:8px">Propuesta matemática para acercarte a tus pesos objetivo, sin vender nada. No tiene en cuenta todavía la situación de los mercados: eso lo añadirá el semáforo (Fase 4).</p>`;
+      <p class="suave" style="margin-top:8px">Reparto para acercarte a tus pesos objetivo, sin vender nada. Por tu elección, la aportación mensual se reparte siempre así (inversión disciplinada); el semáforo es solo informativo.</p>`;
   }
 
   function enlazarDonde() {
@@ -237,6 +237,12 @@
     const el = document.getElementById(id);
     if (!el) return;
     if (!window.Chart) { el.parentNode.innerHTML = '<p class="vacio">El gráfico no ha podido cargarse (sin conexión). Vuelve a intentarlo con conexión.</p>'; return; }
+    // Una sola foto por día (la última) y decimales si los importes son pequeños
+    const porDia = {};
+    historico.forEach(h => { porDia[String(h.fecha).slice(0, 10)] = h; });
+    historico = Object.keys(porDia).sort().map(k => Object.assign({}, porDia[k], { fecha: k }));
+    const maximo = historico.reduce((m, h) => Math.max(m, h.patrimonio || 0, h.invertido_neto || 0), 0);
+    const dec = maximo < 100 ? 2 : 0;
     estado.graficos[id] = new Chart(el, {
       type: 'line',
       data: {
@@ -250,14 +256,134 @@
         responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
         scales: {
           x: { ticks: { color: colorVar('--texto-3'), maxTicksLimit: 6, font: { size: 11 } }, grid: { display: false } },
-          y: { ticks: { color: colorVar('--texto-3'), font: { size: 11 }, callback: v => fmtEur(v, 0) }, grid: { color: colorVar('--borde') } }
+          y: { ticks: { color: colorVar('--texto-3'), font: { size: 11 }, callback: v => fmtEur(v, dec) }, grid: { color: colorVar('--borde') } }
         },
         plugins: {
           legend: { labels: { color: colorVar('--texto-2'), boxWidth: 12, font: { size: 11 } } },
-          tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ' + fmtEur(ctx.raw, 0) } }
+          tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ' + fmtEur(ctx.raw, dec) } }
         }
       }
     });
+  }
+
+  /* ================= Motor de análisis (Fase 4) ================= */
+  const NOMBRE_BLOQUE = { tecnico: 'Técnico', macro: 'Macroeconómico', fundamental: 'Fundamental' };
+  const ICONO_SEM = { verde: '🟢', amarillo: '🟡', rojo: '🔴' };
+
+  function senal(d, id) {
+    const a = d.analisis && d.analisis.activos ? d.analisis.activos.find(x => x.id === id) : null;
+    return a && !a.pendiente ? a : null;
+  }
+
+  function barraPuntos(p, color) {
+    return `<div class="medidor" role="img" aria-label="Puntuación ${p} de 100"><div class="medidor-relleno ${esc(color || '')}" style="width:${Math.max(2, Math.min(100, p))}%"></div>
+      <span class="medidor-marca" style="left:40%"></span><span class="medidor-marca" style="left:65%"></span></div>`;
+  }
+
+  function filaSemaforo(a) {
+    return `<button class="fila-sem" data-senal="${esc(a.id)}">
+      <span class="luz ${esc(a.color)}" aria-hidden="true"></span>
+      <span class="fs-nombre">${esc(a.nombre)}<small>${esc(a.estado)} · confianza ${esc(a.confianza.toLowerCase())}</small></span>
+      <strong class="fs-punt num">${esc(a.puntuacion)}</strong>
+    </button>`;
+  }
+
+  function tarjetaSemaforo(d) {
+    const an = d.analisis;
+    const lista = an ? an.activos.filter(a => !a.pendiente) : [];
+    if (!lista.length) {
+      return `<article class="tarjeta ancho"><h2>Semáforo de oportunidades</h2><p class="vacio">Todavía no hay ningún análisis. Se calcula cada día laborable a las 22:00, o pulsando «Actualizar análisis ahora» en Ajustes.</p></article>`;
+    }
+    return `<article class="tarjeta ancho">
+      <h2>Semáforo de oportunidades <button class="btn pequeno" data-metodologia="1">¿Cómo se calcula?</button></h2>
+      <div class="semaforo">${lista.map(filaSemaforo).join('')}</div>
+      <p class="suave" style="margin-top:8px">Puntuación de 0 a 100 sobre lo favorable que es el entorno para invertir. <strong>No es la probabilidad de ganar dinero.</strong> Pulsa un activo para ver el porqué. Análisis del ${fmtFechaHora(an.ultima_ejecucion)}.</p>
+    </article>`;
+  }
+
+  function tarjetaOportunidades(d) {
+    const an = d.analisis;
+    if (!an) return '';
+    const ops = an.activos.filter(a => !a.pendiente && /COMPRA/.test(a.estado));
+    return `<article class="tarjeta ancho"><h2>Oportunidades detectadas</h2>
+      ${ops.length ? `<div class="semaforo">${ops.map(filaSemaforo).join('')}</div>` :
+        '<p>Hoy <strong>no hay ninguna oportunidad suficientemente justificada</strong>. Lo adecuado es seguir con tu aportación mensual habitual repartida según tus pesos objetivo.</p>'}
+      <p class="suave">Las alertas por correo y Telegram llegarán en la Fase 6.</p></article>`;
+  }
+
+  function htmlSenal(a, completo) {
+    if (!a) return '';
+    const bloques = Object.keys(a.bloques).map(k => {
+      const b = a.bloques[k];
+      return `<div class="bloque-fila"><div class="cab"><span>${esc(NOMBRE_BLOQUE[k])} <span class="suave">(peso ${esc(b.peso_aplicado)} %)</span></span><strong class="num">${esc(b.puntos)}</strong></div>${barraPuntos(b.puntos)}</div>`;
+    }).join('');
+    const ind = Object.keys(a.bloques).map(k => a.bloques[k].indicadores.map(i =>
+      `<tr><td>${esc(i.nombre)}<br><span class="suave">${esc(NOMBRE_BLOQUE[k])}</span></td><td class="der num">${esc(i.valor)}</td><td class="der num"><span class="chip ${i.puntos >= 60 ? 'bien' : (i.puntos <= 40 ? 'alerta' : 'ok')}">${esc(i.puntos)}</span></td></tr>`
+      + `<tr class="lectura"><td colspan="3">${esc(i.lectura)}</td></tr>`).join('')).join('');
+    const lista = (t, arr, cls) => arr && arr.length ? `<h3>${t}</h3><ul class="factores ${cls}">${arr.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
+    const precio = a.precio ? `<p class="suave" style="margin:0">Precio: <strong class="num">${a.precio.moneda === '€' ? fmtEur(a.precio.valor, 2) : fmtNum(a.precio.valor, 0) + ' ' + esc(a.precio.moneda)}</strong> (cierre del ${fmtFecha(a.precio.fecha)})</p>` : '';
+    const tend = a.tendencias ? `<div class="indicadores compacto" style="margin:10px 0">
+        <div class="ind"><div class="nombre">Corto plazo</div><div class="valor">${esc(a.tendencias.corto)}</div><div class="meta">vs. media 20</div></div>
+        <div class="ind"><div class="nombre">Medio plazo</div><div class="valor">${esc(a.tendencias.medio)}</div><div class="meta">vs. media 50</div></div>
+        <div class="ind"><div class="nombre">Largo plazo</div><div class="valor">${esc(a.tendencias.largo)}</div><div class="meta">vs. media 200</div></div>
+        <div class="ind"><div class="nombre">Soporte / resistencia</div><div class="valor num" style="font-size:1rem">${fmtNum(a.soporte, 2)} / ${fmtNum(a.resistencia, 2)}</div><div class="meta">mín. y máx. de 3 meses</div></div>
+      </div>` : '';
+    const op = a.oportunidad ? `<div class="oportunidad">
+        <h3>¿Por qué ahora?</h3><ul class="factores a-favor">${a.oportunidad.porque.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+        <h3>¿Cuánto?</h3><p>${esc(a.oportunidad.cantidad)}</p>
+        <h3>¿De una vez o poco a poco?</h3><p>${esc(a.oportunidad.forma)}</p>
+        <h3>¿Qué invalidaría esta señal?</h3><ul class="factores">${a.oportunidad.invalidacion.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+        <h3>¿Y si espero?</h3><p>${esc(a.oportunidad.riesgo_esperar)}</p></div>` : '';
+    return `<div class="senal">
+      <div class="senal-cab"><span class="luz grande ${esc(a.color)}" aria-hidden="true"></span>
+        <div><div class="senal-estado">${esc(a.estado)}</div><div class="suave">Confianza ${esc(a.confianza.toLowerCase())}: ${esc(a.motivo_confianza)}</div></div>
+        <div class="senal-punt num">${esc(a.puntuacion)}<small>/100</small></div></div>
+      ${barraPuntos(a.puntuacion, a.color)}
+      ${precio}
+      ${a.regla ? `<div class="aviso info" style="margin-top:10px"><span>${esc(a.regla)}</span></div>` : ''}
+      ${a.notas.map(n => `<div class="aviso" style="margin-top:8px"><span>${esc(n)}</span></div>`).join('')}
+      ${op}
+      ${lista('Factores a favor', a.positivos, 'a-favor')}
+      ${lista('Factores en contra', a.negativos, 'en-contra')}
+      ${completo ? tend : ''}
+      <h3>Bloques de análisis</h3><div class="barras">${bloques}</div>
+      ${completo ? `<h3>Indicadores</h3><div class="tabla-scroll"><table class="tabla-ind"><thead><tr><th>Indicador</th><th class="der">Valor</th><th class="der">Nota</th></tr></thead><tbody>${ind}</tbody></table></div>` : ''}
+      ${lista('Riesgos a vigilar', a.riesgos, '')}
+      <h3>Horizonte recomendado</h3><p>${esc(a.horizonte)}</p>
+      <p class="suave">Evaluado el ${fmtFechaHora(a.fecha_eval)}. Fuentes: ${a.fuentes.map(esc).join(' · ')}. Información analítica, no asesoramiento financiero regulado.</p>
+      ${completo ? '' : `<button class="btn pequeno" data-senal="${esc(a.id)}">Ver análisis completo</button>`}
+    </div>`;
+  }
+
+  function modalSenal(id) {
+    const a = senal(estado.datos, id);
+    if (!a) return;
+    abrirModal(a.nombre, htmlSenal(a, true) + historialSenal(id));
+  }
+
+  function historialSenal(id) {
+    const h = estado.datos.analisis && estado.datos.analisis.historial ? estado.datos.analisis.historial[id] : null;
+    if (!h || h.length < 2) return '';
+    return `<h3>Últimas evaluaciones</h3><div class="tabla-scroll"><table><tbody>${h.slice().reverse().slice(0, 10).map(x =>
+      `<tr><td>${fmtFecha(x.fecha)}</td><td>${esc(x.estado)}</td><td class="der num">${esc(x.puntuacion)}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+
+  function modalMetodologia() {
+    const m = estado.datos.metodologia;
+    if (!m) return;
+    abrirModal('¿Cómo se calcula el semáforo?', `
+      <p>Cada indicador (tendencia, RSI, tipos de interés, compras de los bancos centrales…) se convierte en una nota de 0 a 100 con reglas fijas. Las notas se agrupan en bloques y la puntuación final es la media ponderada de los bloques:</p>
+      <div class="tabla-scroll"><table><thead><tr><th>Activo</th><th class="der">Técnico</th><th class="der">Macro</th><th class="der">Fundamental</th></tr></thead><tbody>
+      ${m.pesos.map(p => `<tr><td>${esc(p.nombre)}</td><td class="der">${p.pesos.tecnico ? p.pesos.tecnico + ' %' : '—'}</td><td class="der">${p.pesos.macro ? p.pesos.macro + ' %' : '—'}</td><td class="der">${p.pesos.fundamental ? p.pesos.fundamental + ' %' : '—'}</td></tr>`).join('')}
+      </tbody></table></div>
+      <h3>Estados</h3><ul class="factores">${m.estados.map(e => `<li><strong>${esc(e.estado)}</strong>: ${esc(e.regla)}</li>`).join('')}</ul>
+      <h3>Reglas de seguridad</h3>
+      <ul class="factores"><li>Nunca se indica comprar solo porque el precio haya bajado: los factores de fondo deben acompañar.</li>
+      <li>Nunca se indica vender solo porque el precio haya subido.</li>
+      <li>Si faltan datos, ese bloque no se usa y la confianza baja. Nunca se inventan datos.</li>
+      <li>La puntuación mide lo favorable del entorno, no la probabilidad de ganar dinero.</li>
+      <li>El semáforo es informativo: tu aportación mensual se reparte siempre según tus pesos objetivo.</li></ul>
+      <p class="suave">Volumen de negociación: no se utiliza, porque no existe para el oro ni para las divisas y en los ETF europeos se reparte entre varias bolsas.</p>`);
   }
 
   /* ================= PANTALLA 1 · MI PATRIMONIO ================= */
@@ -287,7 +413,7 @@
 
       ${tarjetaDonde(d)}
 
-      ${bloqueProximamente('Semáforo de oportunidades', 'Fase 4', 'Indicará de un vistazo si el oro y los fondos indexados están en situación favorable, neutral o desfavorable para invertir, combinando análisis fundamental, técnico y macroeconómico con datos reales. No se muestra nada hasta que el motor de análisis esté conectado.')}
+      ${tarjetaSemaforo(d)}
 
       <article class="tarjeta">
         <h2>Evolución del patrimonio</h2>
@@ -309,7 +435,7 @@
 
       ${tarjetaIndicadores('Situación general de los mercados', ['EURUSD', 'BCE_DEPO', 'FED_TIPO', 'IPCA_EZ', 'IPCA_ES', 'BONO10_EZ', 'BONO10_US'], d)}
 
-      ${bloqueProximamente('Oportunidades y alertas', 'Fases 4 y 6', 'Aquí aparecerán las oportunidades detectadas y las alertas importantes, que también recibirás por correo y Telegram.')}
+      ${tarjetaOportunidades(d)}
     `;
     if (d.historico.length >= 2) graficoEvolucion('g-evolucion', d.historico);
     if (c.total > 0) graficoDona('g-dona', c.categorias);
@@ -430,7 +556,8 @@
         <p class="num" style="font-size:1.6rem;font-weight:700;margin:0">${fmtEur(pos ? pos.valor : 0)}</p>
         <p class="suave">${pos ? fmtPct(pos.actual, 1) + ' de tu cartera · objetivo ' + fmtPct(pos.objetivo, 0) : ''}</p>
       </article>
-      ${bloqueProximamente('Puntuación de oportunidad y recomendación', 'Fase 4', 'Puntuación de 0 a 100 y semáforo, combinando el análisis técnico de este precio, los datos del WGC y los factores macro de abajo.')}
+      <article class="tarjeta ancho"><h2>Puntuación de oportunidad y recomendación <button class="btn pequeno" data-metodologia="1">¿Cómo se calcula?</button></h2>
+        ${senal(d, 'ORO') ? htmlSenal(senal(d, 'ORO'), true) + historialSenal('ORO') : '<p class="vacio">Aún no hay análisis del oro. Se calcula cada día laborable a las 22:00.</p>'}</article>
       ${wgcHtml}
       ${tarjetaIndicadores('Factores que mueven el oro (datos oficiales)', ['TIPO_REAL_US', 'DOLAR_INDICE', 'EURUSD', 'INFL_ESPERADA_US', 'IPC_US', 'FED_TIPO'], d,
         'Normalmente, unos tipos de interés reales más bajos y un dólar más débil favorecen al oro. Son relaciones históricas, no reglas fijas.')}
@@ -483,6 +610,8 @@
   /* ================= PANTALLA 3 · FONDOS ================= */
   const NOMBRE_CAT = { RV_DES: 'Renta variable desarrollados / global', RV_EME: 'Renta variable emergentes', ORO: 'Oro', BONOS: 'Bonos gubernamentales', REITS: 'REITs (inmobiliario)', LIQUIDEZ: 'Liquidez' };
 
+  const ELECCION = ['IE00B4L5Y983', 'IE00BKM4GZ66'];
+
   function vistaFondos(el, d) {
     const rv = d.cartera.categorias.filter(c => c.id === 'RV_DES' || c.id === 'RV_EME');
     const pr = d.precios || { referencias: [], graficos: {} };
@@ -505,6 +634,7 @@
           <div style="font-size:.86rem"><span class="pos">✓</span> ${p.pros.map(esc).join('<br><span class="pos">✓</span> ')}</div>
           <div style="font-size:.86rem"><span class="neg">!</span> ${p.contras.map(esc).join('<br><span class="neg">!</span> ')}</div>
           <div class="botonera">
+            ${ELECCION.indexOf(p.isin) >= 0 ? '<span class="chip bien">Tu elección (opción A)</span>' : ''}
             ${p.isin ? (tengo(p.isin) ? '<span class="chip ok">Ya está en tu cartera</span>' : `<button class="btn pequeno" data-alta="${esc(p.isin)}">Añadir a mi cartera</button>`) : ''}
             ${p.fuente ? `<a class="btn pequeno" href="${esc(p.fuente)}" target="_blank" rel="noopener">Ficha</a>` : ''}
           </div>
@@ -525,7 +655,8 @@
         <h2>Tu renta variable</h2>
         ${rv.map(c => `<p style="margin:.2rem 0">${esc(c.nombre)}: <strong class="num">${fmtEur(c.valor, 0)}</strong> <span class="suave">(${fmtPct(c.actual, 1)} · objetivo ${fmtPct(c.objetivo, 0)})</span></p>`).join('')}
       </article>
-      ${bloqueProximamente('Valoraciones y recomendación individualizada', 'Fase 4', 'Tendencia, medias móviles, RSI y otros indicadores sobre estos precios, más valoración (PER/CAPE) cuando esté disponible, para cada índice y producto.')}
+      <article class="tarjeta ancho"><h2>Recomendación por categoría <button class="btn pequeno" data-metodologia="1">¿Cómo se calcula?</button></h2>
+        <div class="vista-senales">${['RV_DES', 'RV_EME', 'BONOS', 'REITS'].map(id => senal(d, id) ? `<div class="tarjeta-interior"><h3 style="margin-top:0">${esc(senal(d, id).nombre)}</h3>${htmlSenal(senal(d, id), false)}</div>` : '').join('') || '<p class="vacio">Aún no hay análisis. Se calcula cada día laborable a las 22:00.</p>'}</div></article>
       <article class="tarjeta ancho">
         <h2>Comparador de productos</h2>
         <p class="suave">Candidatos para cada categoría de tu cartera, con datos verificados el ${fmtFecha(cat.verificado)}. Antes de comprar, busca el ISIN en Trade Republic para confirmar que está disponible y si admite plan de inversión. Es información para comparar, no una recomendación personalizada.</p>
@@ -856,9 +987,10 @@
           <button class="btn primario" type="submit">Guardar</button>
           <button class="btn" type="button" id="btn-mercado">Actualizar datos de mercado</button>
           <button class="btn" type="button" id="btn-precios">Actualizar precios ahora</button>
+          <button class="btn" type="button" id="btn-analisis">Actualizar análisis ahora</button>
           <button class="btn peligro" type="button" id="btn-desconectar">Olvidar este dispositivo</button>
         </div>
-        <p class="suave">Versión de la app: 1.1.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
+        <p class="suave">Versión de la app: 1.2.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
       </form>`, cuerpo => {
       const f = $('#f-ajustes', cuerpo);
       const suma = () => {
@@ -896,6 +1028,12 @@
         try { await cargar('actualizarPrecios', null, 'Precios actualizados'); cerrarModal(); }
         catch (e) { $('.error', f).textContent = e.message; }
         finally { ev.target.disabled = false; }
+      });
+      $('#btn-analisis', cuerpo).addEventListener('click', async ev => {
+        ev.target.disabled = true; ev.target.textContent = 'Analizando… (hasta 1 minuto)';
+        try { await cargar('actualizarAnalisis', null, 'Análisis actualizado'); cerrarModal(); }
+        catch (e) { $('.error', f).textContent = e.message; }
+        finally { ev.target.disabled = false; ev.target.textContent = 'Actualizar análisis ahora'; }
       });
       $('#btn-desconectar', cuerpo).addEventListener('click', () => {
         if (!confirm('Se borrarán la conexión y los datos guardados en este dispositivo (no los del servidor).')) return;
@@ -960,6 +1098,12 @@
   function iniciar() {
     document.querySelectorAll('.navegacion button').forEach(b => b.addEventListener('click', () => irA(b.dataset.vista)));
     $('#btn-ajustes').addEventListener('click', modalAjustes);
+    document.addEventListener('click', ev => {
+      if (!estado.datos) return;
+      const s = ev.target.closest('[data-senal]');
+      if (s) { modalSenal(s.dataset.senal); return; }
+      if (ev.target.closest('[data-metodologia]')) modalMetodologia();
+    });
     $('#btn-refrescar').addEventListener('click', () => { if (estado.conexion) cargar('resumen', null, 'Datos actualizados').catch(() => {}); });
 
     estado.conexion = leerLS(CLAVE_CONEXION);
