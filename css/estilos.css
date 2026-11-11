@@ -233,3 +233,42 @@ dialog::backdrop { background: rgba(8, 14, 26, .55); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Fase 4: semáforo y señales ---------- */
+.semaforo { display: grid; gap: 8px; }
+.fila-sem { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; width: 100%; text-align: left;
+  padding: 12px 14px; border-radius: 14px; border: 1px solid var(--borde); background: var(--superficie-2); color: var(--texto); font: inherit; cursor: pointer; min-height: 56px; }
+.fila-sem:hover { border-color: var(--primario); }
+.fs-nombre { font-weight: 650; font-size: .95rem; }
+.fs-nombre small { display: block; font-weight: 500; color: var(--texto-3); font-size: .78rem; }
+.fs-punt { font-size: 1.35rem; font-weight: 750; }
+.luz { width: 16px; height: 16px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent); }
+.luz.verde { background: #1F9D6B; color: #1F9D6B; }
+.luz.amarillo { background: #E0A100; color: #E0A100; }
+.luz.rojo { background: #D2443A; color: #D2443A; }
+.luz.grande { width: 26px; height: 26px; flex: 0 0 26px; }
+.medidor { position: relative; height: 10px; border-radius: 6px; margin: 8px 0 10px;
+  background: linear-gradient(90deg, color-mix(in srgb, #D2443A 22%, var(--superficie-2)) 0 40%, color-mix(in srgb, #E0A100 22%, var(--superficie-2)) 40% 65%, color-mix(in srgb, #1F9D6B 22%, var(--superficie-2)) 65% 100%); }
+.medidor-relleno { height: 100%; border-radius: 6px; background: var(--texto-3); }
+.medidor-relleno.verde { background: #1F9D6B; } .medidor-relleno.amarillo { background: #E0A100; } .medidor-relleno.rojo { background: #D2443A; }
+.medidor-marca { position: absolute; top: -2px; width: 2px; height: 14px; background: var(--superficie); }
+.senal { display: grid; gap: 4px; }
+.senal h3 { margin: 12px 0 4px; }
+.senal-cab { display: flex; align-items: center; gap: 12px; }
+.senal-cab > div:nth-child(2) { flex: 1; min-width: 0; }
+.senal-estado { font-weight: 750; font-size: 1.02rem; letter-spacing: .01em; }
+.senal-punt { font-size: 2rem; font-weight: 800; line-height: 1; }
+.senal-punt small { font-size: .8rem; color: var(--texto-3); font-weight: 600; }
+.factores { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: .9rem; }
+.factores.a-favor li::marker { color: var(--positivo); }
+.factores.en-contra li::marker { color: var(--negativo); }
+.oportunidad { margin-top: 10px; padding: 12px 14px; border-radius: 12px; border: 1px solid #1F9D6B; background: color-mix(in srgb, #1F9D6B 8%, var(--superficie)); }
+.oportunidad p { font-size: .9rem; }
+.bloque-fila .cab { display: flex; justify-content: space-between; font-size: .88rem; }
+.chip.bien { background: color-mix(in srgb, #1F9D6B 16%, var(--superficie)); color: var(--positivo); }
+.tabla-ind td { white-space: normal; vertical-align: top; }
+.tabla-ind tr.lectura td { color: var(--texto-2); font-size: .82rem; padding-top: 0; border-bottom: 1px solid var(--borde); }
+.tabla-ind tr:not(.lectura) td { border-bottom: 0; }
+.vista-senales { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
+.tarjeta-interior { padding: 14px; border-radius: 14px; background: var(--superficie-2); min-width: 0; }
+.tarjeta-interior .medidor { background: var(--superficie); }
