@@ -272,3 +272,14 @@ dialog::backdrop { background: rgba(8, 14, 26, .55); }
 .vista-senales { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
 .tarjeta-interior { padding: 14px; border-radius: 14px; background: var(--superficie-2); min-width: 0; }
 .tarjeta-interior .medidor { background: var(--superficie); }
+
+/* ---------- Fase 5: perfil y simulador ---------- */
+.escenarios { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); margin-top: 12px; }
+.escenario { padding: 12px 14px; border-radius: 14px; background: var(--superficie-2); }
+.escenario:nth-child(2) { background: var(--acento-suave); }
+.escenario .nombre { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-2); }
+.escenario .valor { font-size: 1.5rem; font-weight: 800; margin: 2px 0; }
+.escenario .meta { font-size: .78rem; color: var(--texto-3); }
+details.hipotesis { border: 1px solid var(--borde); border-radius: 12px; padding: 10px 12px; }
+details.hipotesis summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+input.mini { width: 80px; min-height: 38px; padding: 6px 8px; text-align: right; }
