@@ -308,7 +308,22 @@
     return `<article class="tarjeta ancho"><h2>Oportunidades detectadas</h2>
       ${ops.length ? `<div class="semaforo">${ops.map(filaSemaforo).join('')}</div>` :
         '<p>Hoy <strong>no hay ninguna oportunidad suficientemente justificada</strong>. Lo adecuado es seguir con tu aportación mensual habitual repartida según tus pesos objetivo.</p>'}
-      <p class="suave">Las alertas por correo y Telegram llegarán en la Fase 6.</p></article>`;
+</article>`;
+  }
+
+  const CLASE_NIVEL = { 'Informativa': 'info', 'Oportunidad potencial': 'oport', 'Oportunidad relevante': 'oport-rel', 'Riesgo elevado': 'riesgo' };
+  function tarjetaAlertas(d) {
+    const al = d.alertas;
+    if (!al) return '';
+    const lista = al.recientes || [];
+    return `<article class="tarjeta ancho"><h2>Alertas recientes</h2>
+      ${!al.telegram ? '<div class="aviso info"><span>Telegram aún no está conectado: por ahora las alertas llegan solo por correo. Sigue los pasos de la Fase 6 para activarlo.</span></div>' : ''}
+      ${lista.length ? `<div class="alertas">${lista.map(a => `<details class="alerta ${CLASE_NIVEL[a.nivel] || 'info'}">
+          <summary><span class="nivel">${esc(a.nivel)}</span><span class="tit">${esc(a.titulo)}</span><span class="suave">${fmtFechaHora(a.fecha)}</span></summary>
+          <p>${esc(a.que)}</p>${a.implicaciones ? `<p><strong>Qué implica:</strong> ${esc(a.implicaciones)}</p>` : ''}
+          <p class="suave">Enviada: ${esc(a.enviada || 'pendiente')}</p></details>`).join('')}</div>`
+        : '<p class="vacio">No hay alertas. Es buena señal: solo se avisa cuando pasa algo relevante (revisión diaria a las 22:30).</p>'}
+    </article>`;
   }
 
   function htmlSenal(a, completo) {
@@ -436,6 +451,7 @@
       ${tarjetaIndicadores('Situación general de los mercados', ['EURUSD', 'BCE_DEPO', 'FED_TIPO', 'IPCA_EZ', 'IPCA_ES', 'BONO10_EZ', 'BONO10_US'], d)}
 
       ${tarjetaOportunidades(d)}
+      ${tarjetaAlertas(d)}
     `;
     if (d.historico.length >= 2) graficoEvolucion('g-evolucion', d.historico);
     if (c.total > 0) graficoDona('g-dona', c.categorias);
@@ -1399,6 +1415,14 @@
         <h3>Pesos objetivo (%) <span class="ayuda" id="suma-obj"></span></h3>
         <div class="doble">${cats.map(c => `<label>${esc(c.nombre)}<input class="obj" name="obj_${esc(c.id)}" type="number" min="0" max="100" step="0.5" value="${esc(cfg['obj_' + c.id])}"></label>`).join('')}</div>
         ` : ''}
+        <h3>Alertas</h3>
+        <div class="formulario">
+          <label>Frecuencia<select name="frecuencia_alertas">${['Diaria', 'Solo importantes', 'Semanal'].map(t => `<option ${String(cfg.frecuencia_alertas || 'Diaria') === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+            <span class="ayuda">Diaria: un mensaje como máximo al día, solo si hay novedades. Solo importantes: oportunidades relevantes y riesgos elevados. Semanal: resumen los domingos.</span></label>
+          <label>Canal<select name="canal_alertas">${['Correo y Telegram', 'Solo Telegram', 'Solo correo'].map(t => `<option ${String(cfg.canal_alertas || 'Correo y Telegram') === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+            <span class="ayuda">Telegram: ${estado.datos && estado.datos.alertas && estado.datos.alertas.telegram ? 'conectado ✔' : 'no conectado'}.</span></label>
+        </div>
+        <button class="btn" type="button" id="btn-prueba-alertas">Enviar mensaje de prueba</button>
         <h3>Conexión</h3>
         <label>Dirección de la aplicación web<input name="url" type="url" value="${esc(con.url || '')}" required></label>
         <label>Código de acceso<input name="token" type="password" value="${esc(con.token || '')}" required minlength="20" autocomplete="off"></label>
@@ -1410,7 +1434,7 @@
           <button class="btn" type="button" id="btn-analisis">Actualizar análisis ahora</button>
           <button class="btn peligro" type="button" id="btn-desconectar">Olvidar este dispositivo</button>
         </div>
-        <p class="suave">Versión de la app: 1.3.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
+        <p class="suave">Versión de la app: 1.4.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
       </form>`, cuerpo => {
       const f = $('#f-ajustes', cuerpo);
       const suma = () => {
@@ -1431,7 +1455,7 @@
           if (Math.abs(suma() - 100) > 0.01) { $('.error', f).textContent = 'Los pesos objetivo deben sumar 100 %.'; return; }
           const cfgNueva = {};
           ['aportacion_mensual', 'capital_inicial', 'edad', 'horizonte_anios', 'fondo_emergencia', 'gastos_mensuales', 'meses_colchon',
-           'edad_jubilacion', 'tolerancia', 'aportacion_extra_anual', 'retiro_mensual'].forEach(k => { cfgNueva[k] = d[k]; });
+           'edad_jubilacion', 'tolerancia', 'aportacion_extra_anual', 'retiro_mensual', 'frecuencia_alertas', 'canal_alertas'].forEach(k => { cfgNueva[k] = d[k]; });
           cats.forEach(c => { cfgNueva['obj_' + c.id] = d['obj_' + c.id]; });
           enviarFormulario(f, 'guardarConfig', cfgNueva, 'Ajustes guardados');
         } else {
@@ -1449,6 +1473,12 @@
         try { await cargar('actualizarPrecios', null, 'Precios actualizados'); cerrarModal(); }
         catch (e) { $('.error', f).textContent = e.message; }
         finally { ev.target.disabled = false; }
+      });
+      $('#btn-prueba-alertas', cuerpo).addEventListener('click', async ev => {
+        ev.target.disabled = true; ev.target.textContent = 'Enviando…';
+        try { const r = await cargar('probarAlertas', null); toast('Prueba enviada por: ' + (r.prueba_alertas || []).join(' y ')); }
+        catch (e) { $('.error', f).textContent = e.message; }
+        finally { ev.target.disabled = false; ev.target.textContent = 'Enviar mensaje de prueba'; }
       });
       $('#btn-analisis', cuerpo).addEventListener('click', async ev => {
         ev.target.disabled = true; ev.target.textContent = 'Analizando… (hasta 1 minuto)';
