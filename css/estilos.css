@@ -294,3 +294,13 @@ input.mini { width: 80px; min-height: 38px; padding: 6px 8px; text-align: right;
 .alerta .nivel { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-3); }
 .alerta .tit { font-weight: 650; }
 .alerta p { font-size: .9rem; margin: 8px 0 0; }
+
+/* ---------- Fase 7: informes ---------- */
+.decision, .decision-tarjeta { background: var(--acento-suave); border: 1px solid var(--acento); border-radius: 14px; padding: 14px 16px; }
+.decision-tarjeta { box-shadow: none; }
+.decision .etq, .decision-tarjeta .etq { font-size: .72rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--acento); }
+.decision .tit, .decision-tarjeta .tit { font-size: 1.05rem; font-weight: 700; margin: 4px 0; }
+.decision p { font-size: .9rem; }
+.informe h3 { margin: 16px 0 4px; }
+.informe p { font-size: .92rem; }
+.enlace { background: none; border: 0; padding: 0; color: var(--primario); font: inherit; text-decoration: underline; cursor: pointer; }
