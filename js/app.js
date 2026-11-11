@@ -305,6 +305,8 @@
         ${c.total > 0 ? barrasCategorias(c.categorias, d.catalogos.umbral) : '<p class="vacio">Cuando registres tus inversiones verás aquí cuánto te separa de tu cartera objetivo.</p>'}
       </article>
 
+      ${tarjetaMercadosHoy(d)}
+
       ${tarjetaIndicadores('Situación general de los mercados', ['EURUSD', 'BCE_DEPO', 'FED_TIPO', 'IPCA_EZ', 'IPCA_ES', 'BONO10_EZ', 'BONO10_US'], d)}
 
       ${bloqueProximamente('Oportunidades y alertas', 'Fases 4 y 6', 'Aquí aparecerán las oportunidades detectadas y las alertas importantes, que también recibirás por correo y Telegram.')}
@@ -314,36 +316,239 @@
     enlazarDonde();
   }
 
+  /* ================= Bloques de precios (Fase 3) ================= */
+  const fmtVar = (n, dec) => {
+    if (n === null || n === undefined || isNaN(n)) return '<span class="suave">—</span>';
+    const dd = dec === undefined ? 2 : dec;
+    if (Math.abs(n) < 0.5 * Math.pow(10, -dd)) n = 0;
+    return `<span class="${clase(n)}">${fmtPct(n, dd, true)}</span>`;
+  };
+
+  function avisoPrecios(pr) {
+    if (!pr) return '';
+    if (!pr.configurado) return `<div class="aviso">Los precios automáticos no están activados: falta la clave de EODHD en el servidor (Fase 3, paso 2).</div>`;
+    return '';
+  }
+
+  function piePrecios(pr) {
+    return `<p class="suave" style="margin-top:8px">Fuente: <a href="${esc(pr.fuente_url)}" target="_blank" rel="noopener">${esc(pr.proveedor)}</a> · última actualización ${fmtFechaHora(pr.ultima_ejecucion)} · llamadas hoy ${esc(pr.llamadas_hoy)}/${esc(pr.limite_diario)}. Son precios de cierre del día, no en tiempo real.</p>`;
+  }
+
+  function tarjetaMercadosHoy(d) {
+    const pr = d.precios;
+    if (!pr) return '';
+    const sel = ['GSPC.INDX', 'STOXX50E.INDX', 'EUNL.XETRA', 'IS3N.XETRA'];
+    const filas = [];
+    if (pr.oro && pr.oro.eur) {
+      filas.push(`<div class="ind"><div class="nombre">Oro (onza, en euros)</div><div class="valor num">${fmtEur(pr.oro.eur.cierre, 0)} <small style="font-size:.75rem">${fmtVar(pr.oro.eur.var_1d)}</small></div><div class="meta">Cierre del ${fmtFecha(pr.oro.eur.fecha)} · 1 año: ${fmtVar(pr.oro.eur.var_1a, 1)}</div></div>`);
+    }
+    pr.referencias.filter(r => sel.indexOf(r.simbolo) >= 0).forEach(r => {
+      const m = r.metricas;
+      filas.push(m ? `<div class="ind"><div class="nombre">${esc(r.nombre)}</div><div class="valor num">${fmtNum(m.cierre, 2)} <small style="font-size:.75rem">${fmtVar(m.var_1d)}</small></div><div class="meta">Cierre del ${fmtFecha(m.fecha)} · 1 año: ${fmtVar(m.var_1a, 1)}</div></div>`
+        : `<div class="ind no-disp"><div class="nombre">${esc(r.nombre)}</div><div class="valor">Dato no disponible</div><div class="meta">${esc(String(r.estado).replace('NO DISPONIBLE: ', ''))}</div></div>`);
+    });
+    return `<article class="tarjeta ancho"><h2>Mercados hoy</h2>${avisoPrecios(pr)}<div class="indicadores">${filas.join('')}</div>${pr.configurado ? piePrecios(pr) : ''}</article>`;
+  }
+
+  function graficoLinea(id, serie, etiqueta, fmt) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (!window.Chart) { el.parentNode.innerHTML = '<p class="vacio">El gráfico no ha podido cargarse (sin conexión).</p>'; return; }
+    estado.graficos[id] = new Chart(el, {
+      type: 'line',
+      data: { labels: serie.map(p => fmtFecha(p[0])), datasets: [{ label: etiqueta, data: serie.map(p => p[1]), borderColor: colorVar('--acento'), backgroundColor: 'transparent', pointRadius: 0, borderWidth: 2, tension: .15 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: { ticks: { color: colorVar('--texto-3'), maxTicksLimit: 5, font: { size: 11 } }, grid: { display: false } },
+          y: { ticks: { color: colorVar('--texto-3'), font: { size: 11 }, callback: v => fmt(v) }, grid: { color: colorVar('--borde') } }
+        },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' ' + fmt(ctx.raw) } } }
+      }
+    });
+  }
+
+  function tablaVariaciones(filas) {
+    return `<div class="tabla-scroll"><table><thead><tr><th></th><th class="der">Cierre</th><th class="der">1 día</th><th class="der">1 sem.</th><th class="der">1 mes</th><th class="der">Este año</th><th class="der">1 año</th><th class="der">Desde máx.*</th></tr></thead><tbody>
+      ${filas.map(f => f.m ? `<tr><td>${esc(f.nombre)}</td><td class="der num">${f.fmt(f.m.cierre)}</td><td class="der num">${fmtVar(f.m.var_1d)}</td><td class="der num">${fmtVar(f.m.var_1s)}</td><td class="der num">${fmtVar(f.m.var_1m)}</td><td class="der num">${fmtVar(f.m.var_anio)}</td><td class="der num">${fmtVar(f.m.var_1a)}</td><td class="der num">${fmtVar(f.m.desde_maximo, 1)}</td></tr>`
+        : `<tr><td>${esc(f.nombre)}</td><td colspan="7" class="suave">${esc(String(f.estado || 'Dato no disponible').replace('NO DISPONIBLE: ', 'No disponible: '))}</td></tr>`).join('')}
+      </tbody></table></div>`;
+  }
+
   /* ================= PANTALLA 2 · ORO ================= */
   function vistaOro(el, d) {
     const pos = d.cartera.categorias.find(c => c.id === 'ORO');
+    const pr = d.precios || {};
+    const oro = pr.oro;
+    const w = d.wgc;
+    const monedaOro = estado.monedaOro || 'eur';
+    let precioHtml;
+    if (oro && oro.usd && oro.eur) {
+      const m = monedaOro === 'eur' ? oro.eur : oro.usd;
+      const fmt = monedaOro === 'eur' ? (v => fmtEur(v, 0)) : (v => fmtNum(v, 0) + ' $');
+      precioHtml = `<article class="tarjeta ancho">
+        <h2>Precio del oro <span class="botonera"><button class="btn pequeno ${monedaOro === 'eur' ? 'primario' : ''}" data-moneda="eur">€</button><button class="btn pequeno ${monedaOro === 'usd' ? 'primario' : ''}" data-moneda="usd">$</button></span></h2>
+        <p class="num" style="font-size:2rem;font-weight:750;margin:0">${fmt(m.cierre)} <small style="font-size:1rem">por onza</small></p>
+        <p class="suave">Cierre del ${fmtFecha(m.fecha)} · ${monedaOro === 'eur' ? 'en euros (calculado con el cambio euro/dólar del mismo día)' : 'en dólares'} · ${fmtEur(oro.eur.cierre / 31.1035, 2)} por gramo</p>
+        <div class="indicadores compacto" style="margin:10px 0">
+          <div class="ind"><div class="nombre">1 día</div><div class="valor num">${fmtVar(m.var_1d)}</div></div>
+          <div class="ind"><div class="nombre">1 semana</div><div class="valor num">${fmtVar(m.var_1s)}</div></div>
+          <div class="ind"><div class="nombre">1 mes</div><div class="valor num">${fmtVar(m.var_1m)}</div></div>
+          <div class="ind"><div class="nombre">1 año</div><div class="valor num">${fmtVar(m.var_1a, 1)}</div></div>
+          <div class="ind"><div class="nombre">Desde el máximo*</div><div class="valor num">${fmtVar(m.desde_maximo, 1)}</div><div class="meta">Máx. ${fmt(m.maximo)} el ${fmtFecha(m.fecha_maximo)}</div></div>
+        </div>
+        <div class="grafico"><canvas id="g-oro" aria-label="Evolución del precio del oro"></canvas></div>
+        <p class="suave">* Máximo dentro del historial disponible (desde ${fmtFecha(m.historial_desde)}). Con el plan gratuito de datos es 1 año; con el plan Historian, más de 30.</p>
+        ${piePrecios(pr)}
+      </article>`;
+    } else {
+      precioHtml = `<article class="tarjeta ancho"><h2>Precio del oro</h2>${avisoPrecios(pr)}<p class="vacio">Precio no disponible todavía. Se descargará en la próxima actualización de precios (08:00 y 21:00) o pulsando «Actualizar precios ahora» en Ajustes.</p></article>`;
+    }
+
+    const u = w && w.filas.length ? w.filas[w.filas.length - 1] : null;
+    const wgcHtml = `<article class="tarjeta ancho">
+      <h2>Demanda mundial, bancos centrales y ETF <span class="fase" style="background:var(--superficie-2);color:var(--texto-3)">trimestral</span></h2>
+      ${w && w.pendiente ? `<div class="aviso"><span>Ya está publicado el informe del World Gold Council de <strong>${esc(w.esperado)}</strong> y aún no lo has cargado. ${u ? 'Último cargado: ' + esc(u.trimestre) + '.' : ''}</span></div>` : ''}
+      ${u ? `<div class="indicadores" style="margin-top:10px">
+        <div class="ind"><div class="nombre">Demanda total</div><div class="valor num">${fmtNum(u.demanda_total_t, 0)} t</div></div>
+        <div class="ind"><div class="nombre">Compras netas de bancos centrales</div><div class="valor num">${fmtNum(u.bancos_centrales_t, 0)} t</div></div>
+        <div class="ind"><div class="nombre">Flujos de ETF de oro</div><div class="valor num ${clase(u.etf_flujos_t)}">${u.etf_flujos_t > 0 ? '+' : ''}${fmtNum(u.etf_flujos_t, 0)} t</div></div>
+        <div class="ind"><div class="nombre">Oferta total</div><div class="valor num">${fmtNum(u.oferta_total_t, 0)} t</div></div>
+      </div>
+      <p class="suave">Trimestre ${esc(u.trimestre)} · Fuente: <a href="${esc(w.url)}" target="_blank" rel="noopener">World Gold Council · Gold Demand Trends</a> · cargado ${fmtFechaHora(u.cargado)}</p>
+      ${w.filas.length > 1 ? `<div class="tabla-scroll"><table><thead><tr><th>Trimestre</th><th class="der">Demanda</th><th class="der">Bancos centrales</th><th class="der">ETF</th><th class="der">Oferta</th></tr></thead><tbody>${w.filas.slice().reverse().map(f => `<tr><td>${esc(f.trimestre)}</td><td class="der num">${fmtNum(f.demanda_total_t, 0)}</td><td class="der num">${fmtNum(f.bancos_centrales_t, 0)}</td><td class="der num">${fmtNum(f.etf_flujos_t, 0)}</td><td class="der num">${fmtNum(f.oferta_total_t, 0)}</td></tr>`).join('')}</tbody></table></div>` : ''}`
+      : '<p class="vacio">Aún no hay datos del World Gold Council. Cárgalos con el botón de abajo.</p>'}
+      <div class="botonera" style="margin-top:10px"><button class="btn primario" data-accion="wgc">Cargar datos del trimestre</button>
+      <a class="btn" href="${esc(w ? w.url : '#')}" target="_blank" rel="noopener">Abrir informe del WGC</a></div>
+      <p class="suave">Te enviaremos un correo cada trimestre cuando toque actualizarlos.</p>
+    </article>`;
+
     el.innerHTML = `
-      ${bloqueProximamente('Precio del oro en euros y dólares', 'Fase 3', 'Precio actual, gráfico histórico, tendencia y análisis técnico. Requiere contratar un proveedor de datos autorizado: lo elegiremos en la Fase 3 comparando costes y cobertura.')}
+      ${precioHtml}
       <article class="tarjeta">
         <h2>Tu posición en oro</h2>
         <p class="num" style="font-size:1.6rem;font-weight:700;margin:0">${fmtEur(pos ? pos.valor : 0)}</p>
         <p class="suave">${pos ? fmtPct(pos.actual, 1) + ' de tu cartera · objetivo ' + fmtPct(pos.objetivo, 0) : ''}</p>
       </article>
+      ${bloqueProximamente('Puntuación de oportunidad y recomendación', 'Fase 4', 'Puntuación de 0 a 100 y semáforo, combinando el análisis técnico de este precio, los datos del WGC y los factores macro de abajo.')}
+      ${wgcHtml}
       ${tarjetaIndicadores('Factores que mueven el oro (datos oficiales)', ['TIPO_REAL_US', 'DOLAR_INDICE', 'EURUSD', 'INFL_ESPERADA_US', 'IPC_US', 'FED_TIPO'], d,
         'Normalmente, unos tipos de interés reales más bajos y un dólar más débil favorecen al oro. Son relaciones históricas, no reglas fijas.')}
-      ${bloqueProximamente('Demanda mundial, bancos centrales y flujos de ETF', 'Fase 3', 'Datos del World Gold Council. Se publican de forma periódica (trimestral o mensual) y se incorporarán con su fecha y fuente.')}
-      ${bloqueProximamente('Puntuación de oportunidad y recomendación', 'Fase 4', 'Puntuación de 0 a 100 con metodología transparente y uno de los cinco estados: oportunidad de compra, compra progresiva, mantener, esperar o revisar.')}
     `;
+    if (oro && oro.usd && oro.eur) {
+      const eur = monedaOro === 'eur';
+      graficoLinea('g-oro', eur ? oro.grafico_eur : oro.grafico_usd, 'Oro', eur ? (v => fmtEur(v, 0)) : (v => fmtNum(v, 0) + ' $'));
+    }
+    el.onclick = ev => {
+      const m = ev.target.closest('[data-moneda]');
+      if (m) { estado.monedaOro = m.dataset.moneda; pintar(); return; }
+      if (ev.target.closest('[data-accion="wgc"]')) modalWGC(w);
+    };
+  }
+
+  function modalWGC(w) {
+    abrirModal('Datos del World Gold Council', `
+      <form class="formulario" id="f-wgc">
+        <p class="suave">Copia las cifras del resumen del informe trimestral <em>Gold Demand Trends</em>. Todas en <strong>toneladas</strong>.</p>
+        <div class="doble">
+          <label>Trimestre<input name="trimestre" required pattern="\\d{4}-[Tt][1-4]" value="${esc(w ? w.esperado : '')}" placeholder="2026-T3"></label>
+          <label>Fecha de publicación<input name="fecha_publicacion" type="date" max="${hoyISO()}"></label>
+        </div>
+        <div class="doble">
+          <label>Demanda total (t)<input name="demanda_total_t" type="number" step="any" inputmode="decimal" required></label>
+          <label>Oferta total (t)<input name="oferta_total_t" type="number" step="any" inputmode="decimal" required></label>
+        </div>
+        <div class="doble">
+          <label>Bancos centrales, compras netas (t)<input name="bancos_centrales_t" type="number" step="any" inputmode="decimal" required>
+            <span class="ayuda">Si vendieron más de lo que compraron, en negativo.</span></label>
+          <label>Flujos de ETF de oro (t)<input name="etf_flujos_t" type="number" step="any" inputmode="decimal" required>
+            <span class="ayuda">Entradas en positivo, salidas en negativo.</span></label>
+        </div>
+        <label>Precio medio del trimestre (USD/onza) <span class="ayuda">(opcional)</span><input name="precio_medio_usd" type="number" step="any" inputmode="decimal"></label>
+        <label>Notas <span class="ayuda">(opcional)</span><input name="notas" maxlength="300"></label>
+        <p class="error" role="alert"></p>
+        <div class="botonera"><button class="btn primario" type="submit">Guardar</button>
+          <a class="btn" href="${esc(w ? w.url : '#')}" target="_blank" rel="noopener">Abrir informe</a></div>
+      </form>`, cuerpo => {
+      const f = $('#f-wgc', cuerpo);
+      f.addEventListener('submit', ev => {
+        ev.preventDefault();
+        const d = Object.fromEntries(new FormData(f).entries());
+        d.trimestre = String(d.trimestre).toUpperCase();
+        enviarFormulario(f, 'guardarWGC', d, 'Datos del oro guardados');
+      });
+    });
   }
 
   /* ================= PANTALLA 3 · FONDOS ================= */
+  const NOMBRE_CAT = { RV_DES: 'Renta variable desarrollados / global', RV_EME: 'Renta variable emergentes', ORO: 'Oro', BONOS: 'Bonos gubernamentales', REITS: 'REITs (inmobiliario)', LIQUIDEZ: 'Liquidez' };
+
   function vistaFondos(el, d) {
     const rv = d.cartera.categorias.filter(c => c.id === 'RV_DES' || c.id === 'RV_EME');
+    const pr = d.precios || { referencias: [], graficos: {} };
+    const indices = pr.referencias.filter(r => r.grupo === 'indice');
+    const selIdx = estado.indiceSel && pr.graficos[estado.indiceSel] ? estado.indiceSel : (Object.keys(pr.graficos)[0] || '');
+    const cat = d.catalogo || { productos: [], notas: [] };
+    const tengo = isin => d.cartera.posiciones.some(p => p.isin && p.isin === isin);
+
+    const grupos = Object.keys(NOMBRE_CAT).map(k => {
+      const prods = cat.productos.filter(p => p.categoria === k);
+      if (!prods.length) return '';
+      return `<h3 style="margin:16px 0 8px">${esc(NOMBRE_CAT[k])}</h3><div class="posiciones">${prods.map(p => `
+        <div class="posicion">
+          <div class="arriba"><div><div class="nombre">${esc(p.nombre)}</div>
+            <span class="etiqueta-cat">${p.isin ? esc(p.isin) + ' · ' : ''}${esc(p.tipo)} · ${esc(p.domicilio)}</span></div>
+            <div class="valor num">${p.isin ? 'TER ' + fmtNum(p.ter, 2) + ' %' : ''}</div></div>
+          <div class="detalles">
+            <span>Política<b>${esc(p.politica)}</b></span><span>Réplica<b>${esc(p.replicacion)}</b></span><span>Tamaño<b>${esc(p.tamano)}</b></span>${p.ticker ? `<span>Ticker<b>${esc(p.ticker)}</b></span>` : ''}
+          </div>
+          <div style="font-size:.86rem"><span class="pos">✓</span> ${p.pros.map(esc).join('<br><span class="pos">✓</span> ')}</div>
+          <div style="font-size:.86rem"><span class="neg">!</span> ${p.contras.map(esc).join('<br><span class="neg">!</span> ')}</div>
+          <div class="botonera">
+            ${p.isin ? (tengo(p.isin) ? '<span class="chip ok">Ya está en tu cartera</span>' : `<button class="btn pequeno" data-alta="${esc(p.isin)}">Añadir a mi cartera</button>`) : ''}
+            ${p.fuente ? `<a class="btn pequeno" href="${esc(p.fuente)}" target="_blank" rel="noopener">Ficha</a>` : ''}
+          </div>
+        </div>`).join('')}</div>`;
+    }).join('');
+
     el.innerHTML = `
-      ${bloqueProximamente('Evolución de los índices', 'Fase 3', 'MSCI World, FTSE All-World, MSCI Emerging Markets, S&P 500, Nasdaq 100 y principales índices europeos y asiáticos, con datos de un proveedor autorizado.')}
+      <article class="tarjeta ancho">
+        <h2>Evolución de los índices</h2>
+        ${avisoPrecios(pr)}
+        ${tablaVariaciones(indices.map(r => ({ nombre: r.nombre, m: r.metricas, estado: r.estado, fmt: v => r.unidad === '€' ? fmtEur(v, 2) : fmtNum(v, 0) })))}
+        <p class="suave">* Caída desde el máximo dentro del historial disponible. MSCI World y Emergentes se siguen a través del precio de su ETF (los índices de MSCI requieren licencia).</p>
+        ${selIdx ? `<div class="botonera" style="margin:10px 0">${Object.keys(pr.graficos).map(s => `<button class="btn pequeno ${s === selIdx ? 'primario' : ''}" data-indice="${esc(s)}">${esc((indices.find(r => r.simbolo === s) || {}).nombre || s).replace(/ \(.*\)/, '')}</button>`).join('')}</div>
+        <div class="grafico"><canvas id="g-indice" aria-label="Evolución del índice"></canvas></div>` : ''}
+        ${pr.configurado ? piePrecios(pr) : ''}
+      </article>
       <article class="tarjeta">
         <h2>Tu renta variable</h2>
         ${rv.map(c => `<p style="margin:.2rem 0">${esc(c.nombre)}: <strong class="num">${fmtEur(c.valor, 0)}</strong> <span class="suave">(${fmtPct(c.actual, 1)} · objetivo ${fmtPct(c.objetivo, 0)})</span></p>`).join('')}
       </article>
+      ${bloqueProximamente('Valoraciones y recomendación individualizada', 'Fase 4', 'Tendencia, medias móviles, RSI y otros indicadores sobre estos precios, más valoración (PER/CAPE) cuando esté disponible, para cada índice y producto.')}
+      <article class="tarjeta ancho">
+        <h2>Comparador de productos</h2>
+        <p class="suave">Candidatos para cada categoría de tu cartera, con datos verificados el ${fmtFecha(cat.verificado)}. Antes de comprar, busca el ISIN en Trade Republic para confirmar que está disponible y si admite plan de inversión. Es información para comparar, no una recomendación personalizada.</p>
+        ${grupos}
+        <h3 style="margin:16px 0 8px">Fiscalidad en España (resumen)</h3>
+        ${cat.notas.map(n => `<div class="aviso info">${esc(n)}</div>`).join('')}
+      </article>
       ${tarjetaIndicadores('Entorno de tipos de interés y bonos', ['BCE_DEPO', 'FED_TIPO', 'BONO10_EZ', 'BONO10_US', 'IPCA_EZ'], d,
         'Los tipos de interés influyen en la valoración de las bolsas y en el precio de los bonos que ya tienes.')}
-      ${bloqueProximamente('Valoraciones, comparador de productos y recomendación', 'Fases 3 y 4', 'PER, CAPE, costes (TER), domicilio fiscal y disponibilidad en Trade Republic de cada ETF, con una recomendación individualizada.')}
     `;
+    if (selIdx) {
+      const r = indices.find(x => x.simbolo === selIdx) || {};
+      graficoLinea('g-indice', pr.graficos[selIdx], r.nombre || selIdx, v => r.unidad === '€' ? fmtEur(v, 2) : fmtNum(v, 0));
+    }
+    el.onclick = ev => {
+      const b = ev.target.closest('[data-indice]');
+      if (b) { estado.indiceSel = b.dataset.indice; pintar(); return; }
+      const a = ev.target.closest('[data-alta]');
+      if (a) {
+        const p = cat.productos.find(x => x.isin === a.dataset.alta);
+        modalActivo(null, { nombre: p.nombre, isin: p.isin, ticker: p.ticker, categoria: p.categoria, tipo: p.tipo, region: p.region, divisa: p.divisa });
+      }
+    };
   }
 
   /* ================= PANTALLA 4 · MI CARTERA ================= */
@@ -489,9 +694,9 @@
     return `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(t)}</option>`;
   }).join('');
 
-  function modalActivo(a) {
+  function modalActivo(a, precarga) {
     const cat = estado.datos.catalogos;
-    a = a || {};
+    a = a || precarga || {};
     abrirModal(a.id ? 'Editar activo' : 'Añadir activo', `
       <form class="formulario" id="f-activo">
         <label>Nombre<input name="nombre" required maxlength="120" value="${esc(a.nombre)}" placeholder="p. ej. Vanguard FTSE All-World (Acc)"></label>
@@ -504,6 +709,10 @@
           <label>ISIN <span class="ayuda">(opcional)</span><input name="isin" maxlength="12" value="${esc(a.isin)}" placeholder="IE00BK5BQT80" autocapitalize="characters"></label>
           <label>Ticker <span class="ayuda">(opcional)</span><input name="ticker" maxlength="20" value="${esc(a.ticker)}" placeholder="VWCE"></label>
         </div>
+        <label>Símbolo de datos (EODHD) <span class="ayuda">(para el precio automático)</span>
+          <div style="display:flex;gap:8px"><input name="simbolo_datos" maxlength="30" value="${esc(a.simbolo_datos || '')}" placeholder="p. ej. VWCE.XETRA" autocapitalize="characters" style="flex:1">
+          <button class="btn pequeno" type="button" id="btn-buscar-simbolo">Buscar por ISIN</button></div>
+          <span class="ayuda" id="ayuda-simbolo">Si lo dejas vacío y has puesto el ISIN, la app lo buscará al guardar. No hace falta en liquidez.</span></label>
         <label>Divisa de exposición<select name="divisa_exposicion">${opciones(cat.divisas, a.divisa || 'EUR')}</select>
           <span class="ayuda">La moneda de los activos que contiene, no la de cotización. Un ETF mundial es «Multidivisa»; el oro, «USD».</span></label>
         <label>Notas <span class="ayuda">(opcional)</span><textarea name="notas" rows="2" maxlength="500">${esc(a.notas || '')}</textarea></label>
@@ -519,6 +728,18 @@
         const d = Object.fromEntries(new FormData(f).entries());
         d.id = a.id || '';
         enviarFormulario(f, 'guardarActivo', d, 'Activo guardado');
+      });
+      $('#btn-buscar-simbolo', cuerpo).addEventListener('click', async ev => {
+        const isin = f.isin.value.trim();
+        const ayuda = $('#ayuda-simbolo', cuerpo);
+        if (!isin) { ayuda.textContent = 'Escribe primero el ISIN.'; return; }
+        ev.target.disabled = true; ayuda.textContent = 'Buscando…';
+        try {
+          const r = await api('buscarSimbolo', { isin: isin });
+          f.simbolo_datos.value = r.simbolo;
+          ayuda.textContent = 'Encontrado: ' + r.nombre + ' (' + r.bolsa + ', ' + r.divisa + ').' + (r.divisa !== 'EUR' ? ' Atención: no cotiza en euros en esta bolsa.' : '');
+        } catch (e) { ayuda.textContent = 'No encontrado: ' + e.message; }
+        finally { ev.target.disabled = false; }
       });
       const b = $('#btn-borrar-activo', cuerpo);
       if (b) b.addEventListener('click', () => {
@@ -634,9 +855,10 @@
         <div class="botonera">
           <button class="btn primario" type="submit">Guardar</button>
           <button class="btn" type="button" id="btn-mercado">Actualizar datos de mercado</button>
+          <button class="btn" type="button" id="btn-precios">Actualizar precios ahora</button>
           <button class="btn peligro" type="button" id="btn-desconectar">Olvidar este dispositivo</button>
         </div>
-        <p class="suave">Versión de la app: 1.0.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
+        <p class="suave">Versión de la app: 1.1.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
       </form>`, cuerpo => {
       const f = $('#f-ajustes', cuerpo);
       const suma = () => {
@@ -666,6 +888,12 @@
       $('#btn-mercado', cuerpo).addEventListener('click', async ev => {
         ev.target.disabled = true;
         try { await cargar('actualizarMercado', null, 'Datos de mercado actualizados'); cerrarModal(); }
+        catch (e) { $('.error', f).textContent = e.message; }
+        finally { ev.target.disabled = false; }
+      });
+      $('#btn-precios', cuerpo).addEventListener('click', async ev => {
+        ev.target.disabled = true;
+        try { await cargar('actualizarPrecios', null, 'Precios actualizados'); cerrarModal(); }
         catch (e) { $('.error', f).textContent = e.message; }
         finally { ev.target.disabled = false; }
       });
