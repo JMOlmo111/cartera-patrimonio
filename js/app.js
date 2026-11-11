@@ -784,16 +784,424 @@
     return `<div class="tabla-scroll"><table><tbody>${lista.map(r => `<tr><td>${esc(r.nombre)}</td><td class="der num">${fmtEur(r.valor, 0)}</td><td class="der num">${fmtPct(r.pct, 1)}</td></tr>`).join('')}</tbody></table></div>`;
   }
 
-  /* ================= PANTALLA 5 · ASESOR E INFORMES ================= */
-  function vistaInformes(el) {
+  /* ================= PANTALLA 5 · ASESOR (Fase 5: perfil y simulador) ================= */
+  const ORDEN_SIM = ['RV_DES', 'RV_EME', 'ORO', 'BONOS', 'REITS', 'LIQUIDEZ'];
+  // Hipótesis de partida (rentabilidad media anual nominal en euros y volatilidad), editables.
+  // Referencia: J.P. Morgan Long-Term Capital Market Assumptions 2026 (10-15 años), ajustadas a la baja para un inversor en euros.
+  const HIPOTESIS = {
+    RV_DES:   { r: 6.5, v: 15 },
+    RV_EME:   { r: 6.5, v: 20 },
+    ORO:      { r: 4.0, v: 15 },
+    BONOS:    { r: 3.0, v: 4 },
+    REITS:    { r: 6.0, v: 19 },
+    LIQUIDEZ: { r: 2.5, v: 0.5 }
+  };
+  const CORRELACION = [
+    [1.00, 0.75, 0.10, 0.05, 0.70, 0.00],
+    [0.75, 1.00, 0.15, 0.00, 0.60, 0.00],
+    [0.10, 0.15, 1.00, 0.20, 0.15, 0.00],
+    [0.05, 0.00, 0.20, 1.00, 0.20, 0.10],
+    [0.70, 0.60, 0.15, 0.20, 1.00, 0.00],
+    [0.00, 0.00, 0.00, 0.10, 0.00, 1.00]
+  ];
+  const PRUDENTE = { RV_DES: 35, RV_EME: 10, ORO: 15, BONOS: 30, REITS: 5, LIQUIDEZ: 5 };
+  // Escenarios de crisis hipotéticos (caídas aproximadas de pico a valle inspiradas en episodios reales)
+  const CRISIS = {
+    gfc: { nombre: 'Gran crisis financiera (tipo 2008)', choque: { RV_DES: -45, RV_EME: -50, ORO: 5, BONOS: 5, REITS: -55, LIQUIDEZ: 0 } },
+    inflacion: { nombre: 'Inflación y subida de tipos (tipo 2022)', choque: { RV_DES: -15, RV_EME: -20, ORO: 0, BONOS: -12, REITS: -25, LIQUIDEZ: 0 } },
+    decada: { nombre: 'Década perdida en bolsa (tipo 2000-2010)', choque: null, decada: true }
+  };
+
+  function pesosObjetivo(cfg) {
+    const p = {};
+    ORDEN_SIM.forEach(k => { p[k] = Number(cfg['obj_' + k]) || 0; });
+    return p;
+  }
+  const pesoBolsa = p => (p.RV_DES || 0) + (p.RV_EME || 0) + (p.REITS || 0);
+  const caidaCrisis = p => ORDEN_SIM.reduce((s, k) => s + (p[k] || 0) / 100 * CRISIS.gfc.choque[k], 0);
+
+  function evaluarPerfil(d) {
+    const cfg = d.config;
+    const edad = Number(cfg.edad) || 0, jub = Number(cfg.edad_jubilacion) || 66;
+    const gastos = Number(cfg.gastos_mensuales) || 0, meses = Number(cfg.meses_colchon) || 6;
+    const tiene = String(cfg.fondo_emergencia).indexOf('S') === 0;
+    const tol = String(cfg.tolerancia || 'Moderada');
+    const ref = Math.max(20, Math.min(80, 110 - edad + (tol === 'Baja' ? -10 : (tol === 'Alta' ? 10 : 0))));
+    const p = pesosObjetivo(cfg);
+    const bolsa = pesoBolsa(p);
+    const aport = Number(cfg.aportacion_mensual) || 0;
+    const colchon = gastos * meses;
+    return {
+      edad: edad, jub: jub, anios: Math.max(0, jub - edad), tol: tol, gastos: gastos, meses: meses, tiene: tiene,
+      colchon: colchon, mesesAhorro: aport > 0 ? Math.ceil(colchon / aport) : null,
+      ref: ref, bolsa: bolsa, caida: caidaCrisis(p), caidaPrudente: caidaCrisis(PRUDENTE),
+      veredicto: bolsa > ref + 5 ? 'alto' : (bolsa < ref - 10 ? 'bajo' : 'adecuado')
+    };
+  }
+
+  function tarjetaPerfil(d) {
+    const e = evaluarPerfil(d);
+    const fondo = e.tiene ? '<p>Has indicado que ya tienes un fondo de emergencia aparte. ✔</p>' : `
+      <p><strong>Recomendado: ${fmtEur(e.colchon, 0)}</strong> (${e.meses} meses × ${fmtEur(e.gastos, 0)} de gastos), en liquidez disponible y <strong>fuera de esta cartera</strong>.</p>
+      <p class="suave">Ahora mismo no tienes ese colchón. Con ${fmtEur(Number(d.config.aportacion_mensual) || 0, 0)} al mes tardarías unos ${e.mesesAhorro || '—'} meses en reunirlo; una parte de las aportaciones extraordinarias que planeas para enero podría acelerarlo. Sin colchón, un imprevisto podría obligarte a vender inversiones en mal momento.</p>`;
+    const textoVer = e.veredicto === 'alto'
+      ? `Tu cartera objetivo tiene un <strong>${fmtNum(e.bolsa, 0)} %</strong> en bolsa (incluidos REITs). Con ${e.anios} años hasta la jubilación y tolerancia ${e.tol.toLowerCase()}, la referencia orientativa sería en torno a un <strong>${fmtNum(e.ref, 0)} %</strong>. Es <strong>algo elevado</strong>.`
+      : e.veredicto === 'bajo'
+        ? `Tu cartera objetivo tiene un ${fmtNum(e.bolsa, 0)} % en bolsa, por debajo de la referencia orientativa (${fmtNum(e.ref, 0)} %). Es prudente, aunque puede crecer menos.`
+        : `Tu cartera objetivo tiene un ${fmtNum(e.bolsa, 0)} % en bolsa, en línea con la referencia orientativa (${fmtNum(e.ref, 0)} %).`;
+    return `<article class="tarjeta ancho">
+      <h2>Tu perfil inversor <button class="btn pequeno" id="btn-editar-perfil">Editar</button></h2>
+      <div class="indicadores compacto">
+        <div class="ind"><div class="nombre">Edad</div><div class="valor">${esc(e.edad)} años</div></div>
+        <div class="ind"><div class="nombre">Jubilación prevista</div><div class="valor">${esc(e.jub)} años</div><div class="meta">dentro de ${e.anios} años</div></div>
+        <div class="ind"><div class="nombre">Tolerancia a pérdidas</div><div class="valor">${esc(e.tol)}</div></div>
+        <div class="ind"><div class="nombre">Gastos mensuales</div><div class="valor num">${fmtEur(e.gastos, 0)}</div></div>
+      </div>
+      <h3>Fondo de emergencia</h3>${fondo}
+      <h3>¿Encaja tu cartera con tu edad?</h3>
+      <p>${textoVer}</p>
+      <p>En una crisis como la de 2008, tu cartera objetivo podría caer en torno a un <strong>${fmtNum(-e.caida, 0)} %</strong> (por ejemplo, de 20.000 € a ${fmtEur(20000 * (1 + e.caida / 100), 0)}). Dijiste que ante una caída del 30 % aguantarías: estarías justo en ese límite.</p>
+      <p>Una alternativa más prudente (${fmtNum(pesoBolsa(PRUDENTE), 0)} % en bolsa, con más bonos) caería en torno a un ${fmtNum(-e.caidaPrudente, 0)} %. Puedes comparar ambas en el simulador de abajo.</p>
+      <p class="suave">Valoración analítica, no asesoramiento regulado. La referencia usa la regla práctica «110 menos la edad», ajustada a tu tolerancia; es una orientación, no una norma. La decisión es tuya: si quieres cambiar los pesos, hazlo en Ajustes.</p>
+    </article>`;
+  }
+
+  /* ---------- Motor Monte Carlo (se calcula en el propio móvil) ---------- */
+  function rngSemilla(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function normalDe(rnd) {
+    let u = 0, v = 0;
+    while (u === 0) u = rnd();
+    while (v === 0) v = rnd();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+  function cholesky(m) {
+    const n = m.length, L = m.map(() => new Array(n).fill(0));
+    for (let i = 0; i < n; i++) for (let j = 0; j <= i; j++) {
+      let s = m[i][j];
+      for (let k = 0; k < j; k++) s -= L[i][k] * L[j][k];
+      L[i][j] = i === j ? Math.sqrt(Math.max(s, 1e-10)) : s / L[j][j];
+    }
+    return L;
+  }
+  function percentil(arr, p) {
+    const a = arr.slice().sort((x, y) => x - y);
+    const i = (a.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i);
+    return a[lo] + (a[hi] - a[lo]) * (i - lo);
+  }
+
+  /** Simulación Monte Carlo mensual con colas gruesas (t de Student, 6 g.l.) y rebalanceo mensual. */
+  function simular(par, pesos, hip, nSim) {
+    const meses = par.anios * 12;
+    const L = cholesky(CORRELACION);
+    const n = 6;
+    const w = ORDEN_SIM.map(k => (pesos[k] || 0) / 100);
+    const mu = ORDEN_SIM.map(k => { const h = hip[k]; return (Math.log(1 + h.r / 100) - Math.pow(h.v / 100, 2) / 2) / 12; });
+    const sd = ORDEN_SIM.map(k => hip[k].v / 100 / Math.sqrt(12));
+    const terMes = par.ter / 100 / 12;
+    const infMes = Math.pow(1 + par.inflacion / 100, 1 / 12) - 1;
+    const mesJub = Math.max(0, (par.jub - par.edad) * 12);
+    const hoy = new Date();
+    // Flujos de cada mes (iguales en todas las simulaciones)
+    const flujo = new Float64Array(meses);
+    for (let m = 0; m < meses; m++) {
+      const mesCal = (hoy.getMonth() + 1 + m) % 12;
+      const anioCal = hoy.getFullYear() + Math.floor((hoy.getMonth() + 1 + m) / 12);
+      if (m < mesJub) flujo[m] = par.aportacion + ((mesCal === 0 && anioCal >= 2027) ? par.extra : 0);
+      else if (par.retiro > 0) flujo[m] = -par.retiro * Math.pow(1 + infMes, m);
+    }
+    const finales = new Float64Array(nSim), caidas = new Float64Array(nSim);
+    const anuales = [];
+    for (let y = 0; y < par.anios; y++) anuales.push(new Float64Array(nSim));
+    let agotadas = 0;
+    const rnd = rngSemilla(20261111);
+    const z = new Float64Array(n);
+    let guardado = null;
+    const normal = () => {
+      if (guardado !== null) { const g = guardado; guardado = null; return g; }
+      let u = rnd(); while (u === 0) u = rnd();
+      const v = rnd(), r = Math.sqrt(-2 * Math.log(u)), a = 2 * Math.PI * v;
+      guardado = r * Math.sin(a);
+      return r * Math.cos(a);
+    };
+    for (let s = 0; s < nSim; s++) {
+      let V = par.capital, indice = 1, pico = 1, peorCaida = 0, agotada = false;
+      for (let m = 0; m < meses; m++) {
+        V += flujo[m];
+        if (V <= 0) { V = 0; agotada = true; }
+        for (let i = 0; i < n; i++) z[i] = normal();
+        // chi-cuadrado con 6 grados de libertad = -2·ln(u1·u2·u3)
+        const chi = -2 * Math.log((rnd() || 1e-12) * (rnd() || 1e-12) * (rnd() || 1e-12));
+        const escala = Math.sqrt(4 / chi);
+        let r = -terMes;
+        for (let i = 0; i < n; i++) {
+          if (!w[i]) continue;
+          let e = 0; const Li = L[i];
+          for (let j = 0; j <= i; j++) e += Li[j] * z[j];
+          r += w[i] * (Math.exp(mu[i] + sd[i] * e * escala) - 1);
+        }
+        V *= (1 + r);
+        indice *= (1 + r);
+        if (indice > pico) pico = indice;
+        else { const c = indice / pico - 1; if (c < peorCaida) peorCaida = c; }
+        if ((m + 1) % 12 === 0) anuales[(m + 1) / 12 - 1][s] = V;
+      }
+      finales[s] = V; caidas[s] = peorCaida * 100;
+      if (agotada) agotadas++;
+    }
+    // aportado acumulado (determinista)
+    const aportado = [];
+    let ap = par.capital;
+    for (let m = 0; m < meses; m++) {
+      const mesCal = (hoy.getMonth() + 1 + m) % 12;
+      const anioCal = hoy.getFullYear() + Math.floor((hoy.getMonth() + 1 + m) / 12);
+      if (m < mesJub) { ap += par.aportacion; if (mesCal === 0 && anioCal >= 2027) ap += par.extra; }
+      if ((m + 1) % 12 === 0) aportado.push(ap);
+    }
+    const porAnio = [];
+    for (let y = 0; y < par.anios; y++) {
+      const col = Array.from(anuales[y]);
+      const def = Math.pow(1 + par.inflacion / 100, y + 1);
+      porAnio.push({ anio: y + 1, edad: par.edad + y + 1, aportado: aportado[y], p10: percentil(col, .1), p50: percentil(col, .5), p90: percentil(col, .9), p50real: percentil(col, .5) / def });
+    }
+    const defFin = Math.pow(1 + par.inflacion / 100, par.anios);
+    const apFin = aportado[aportado.length - 1];
+    const fin = Array.from(finales), cai = Array.from(caidas);
+    return {
+      porAnio: porAnio, aportado: apFin,
+      p10: percentil(fin, .1), p50: percentil(fin, .5), p90: percentil(fin, .9), deflactor: defFin,
+      probPerdida: fin.filter(v => v < apFin).length / nSim * 100,
+      probPerdidaReal: fin.filter(v => v / defFin < apFin).length / nSim * 100,
+      caidaTipica: percentil(cai, .5), caidaMala: percentil(cai, .1),
+      probAgotar: agotadas / nSim * 100,
+      rentEsperada: ORDEN_SIM.reduce((s, k, i) => s + w[i] * hip[k].r, 0) - par.ter
+    };
+  }
+
+  /** Trayectoria central determinista con una crisis hipotética en un año concreto. */
+  function simularCrisis(par, pesos, hip, tipo, anioCrisis) {
+    const c = CRISIS[tipo];
+    const meses = par.anios * 12, mesJub = Math.max(0, (par.jub - par.edad) * 12);
+    const hoy = new Date();
+    const infMes = Math.pow(1 + par.inflacion / 100, 1 / 12) - 1;
+    const correr = conCrisis => {
+      let V = par.capital, caidaAnio = 0;
+      for (let m = 0; m < meses; m++) {
+        const mesCal = (hoy.getMonth() + 1 + m) % 12;
+        const anioCal = hoy.getFullYear() + Math.floor((hoy.getMonth() + 1 + m) / 12);
+        if (m < mesJub) { V += par.aportacion; if (mesCal === 0 && anioCal >= 2027) V += par.extra; }
+        else if (par.retiro > 0) V = Math.max(0, V - par.retiro * Math.pow(1 + infMes, m));
+        const y = Math.floor(m / 12);
+        if (conCrisis && c.choque && m === anioCrisis * 12) {
+          const g = ORDEN_SIM.reduce((s, k) => s + (pesos[k] || 0) / 100 * c.choque[k] / 100, 0);
+          caidaAnio = g * 100;
+          V *= (1 + g);
+        }
+        const r = ORDEN_SIM.reduce((s, k) => {
+          let anual = hip[k].r;
+          if (conCrisis && c.decada && (k === 'RV_DES' || k === 'RV_EME' || k === 'REITS') && y >= anioCrisis && y < anioCrisis + 10) anual = 0;
+          return s + (pesos[k] || 0) / 100 * (Math.pow(1 + anual / 100, 1 / 12) - 1);
+        }, 0) - par.ter / 100 / 12;
+        V *= (1 + r);
+      }
+      return { V: V, caida: caidaAnio };
+    };
+    const sin = correr(false), con = correr(true);
+    return { sin: sin.V, con: con.V, caida: con.caida, nombre: c.nombre, decada: !!c.decada };
+  }
+
+  function paramsSimulador(d) {
+    const cfg = d.config;
+    const g = (id, def) => { const el = document.getElementById(id); const v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? def : v; };
+    return {
+      capital: g('s-capital', d.cartera.total),
+      aportacion: g('s-aportacion', Number(cfg.aportacion_mensual) || 0),
+      extra: g('s-extra', Number(cfg.aportacion_extra_anual) || 0),
+      edad: Number(cfg.edad) || 58,
+      jub: g('s-jub', Number(cfg.edad_jubilacion) || 66),
+      anios: g('s-anios', 20),
+      retiro: g('s-retiro', Number(cfg.retiro_mensual) || 0),
+      inflacion: g('s-inflacion', 2.5),
+      ter: g('s-ter', 0.2)
+    };
+  }
+
+  function leerHipotesis() {
+    const h = {};
+    ORDEN_SIM.forEach(k => {
+      const r = parseFloat((document.getElementById('h-r-' + k) || {}).value);
+      const v = parseFloat((document.getElementById('h-v-' + k) || {}).value);
+      h[k] = { r: isNaN(r) ? HIPOTESIS[k].r : r, v: isNaN(v) ? HIPOTESIS[k].v : v };
+    });
+    return h;
+  }
+
+  function tarjetaSimulador(d) {
+    const cfg = d.config;
+    const nombres = { RV_DES: 'RV desarrollados', RV_EME: 'RV emergentes', ORO: 'Oro', BONOS: 'Bonos', REITS: 'REITs', LIQUIDEZ: 'Liquidez' };
+    const obj = pesosObjetivo(cfg);
+    return `<article class="tarjeta ancho" id="tarjeta-sim">
+      <h2>Simulador de patrimonio</h2>
+      <p class="suave">Proyecta tu patrimonio con 2.000 simulaciones de cómo podrían comportarse los mercados (método Monte Carlo). Son <strong>hipótesis, no promesas</strong>.</p>
+      <form class="formulario" id="f-sim">
+        <div class="doble">
+          <label>Capital inicial (€)<input id="s-capital" type="number" min="0" step="any" inputmode="decimal" value="${esc(Math.round(d.cartera.total * 100) / 100)}"></label>
+          <label>Aportación mensual (€)<input id="s-aportacion" type="number" min="0" step="any" inputmode="decimal" value="${esc(cfg.aportacion_mensual)}"></label>
+        </div>
+        <div class="doble">
+          <label>Aportación extra cada enero (€)<input id="s-extra" type="number" min="0" step="any" inputmode="decimal" value="${esc(cfg.aportacion_extra_anual || 0)}"><span class="ayuda">A partir de enero de 2027.</span></label>
+          <label>Edad de jubilación<input id="s-jub" type="number" min="${esc(cfg.edad)}" max="80" value="${esc(cfg.edad_jubilacion || 66)}"><span class="ayuda">Las aportaciones se detienen entonces.</span></label>
+        </div>
+        <div class="doble">
+          <label>Horizonte<select id="s-anios"><option value="15">15 años</option><option value="20" selected>20 años</option></select></label>
+          <label>Retirada mensual tras jubilarte (€ de hoy)<input id="s-retiro" type="number" min="0" step="any" inputmode="decimal" value="${esc(cfg.retiro_mensual || 0)}"><span class="ayuda">Se actualiza con la inflación.</span></label>
+        </div>
+        <div class="doble">
+          <label>Inflación anual (%)<input id="s-inflacion" type="number" min="0" max="15" step="0.1" value="2.5"><span class="ayuda">El objetivo del BCE es el 2 %.</span></label>
+          <label>Comisiones anuales (%)<input id="s-ter" type="number" min="0" max="3" step="0.01" value="0.20"><span class="ayuda">TER medio de tus ETF.</span></label>
+        </div>
+        <details class="hipotesis"><summary>Hipótesis de rentabilidad y riesgo (editables)</summary>
+          <div class="tabla-scroll"><table><thead><tr><th>Activo</th><th class="der">Peso objetivo</th><th class="der">Rentab. media %</th><th class="der">Volatilidad %</th></tr></thead><tbody>
+          ${ORDEN_SIM.map(k => `<tr><td>${nombres[k]}</td><td class="der">${fmtNum(obj[k], 0)} %</td>
+            <td class="der"><input id="h-r-${k}" class="mini" type="number" step="0.1" value="${HIPOTESIS[k].r}"></td>
+            <td class="der"><input id="h-v-${k}" class="mini" type="number" step="0.5" min="0" value="${HIPOTESIS[k].v}"></td></tr>`).join('')}
+          </tbody></table></div>
+          <p class="suave">Rentabilidades medias anuales en euros, antes de comisiones. Punto de partida: previsiones a 10-15 años de J.P. Morgan (Long-Term Capital Market Assumptions 2026: bolsa global 7,5 %, bonos agregados globales 5,3 %, en su moneda), ajustadas a la baja para un inversor en euros, porque los tipos de interés en euros son más bajos. La simulación usa colas gruesas para reflejar que las crisis son más frecuentes de lo que supone una campana normal. No son predicciones.</p>
+        </details>
+        <button class="btn primario" type="submit">Simular</button>
+      </form>
+      <div id="sim-resultado" aria-live="polite"></div>
+    </article>`;
+  }
+
+  function htmlResultado(par, rA, rB) {
+    const real = (v, r) => v / r.deflactor;
+    const fila = (titulo, txt, r) => `<div class="escenario">
+        <div class="nombre">${titulo}</div>
+        <div class="valor num">${fmtEur(r, 0)}</div>
+        <div class="meta">${txt}</div></div>`;
+    const comp = rB ? `<h3>Comparación: tu cartera objetivo frente a una alternativa prudente</h3>
+      <div class="tabla-scroll"><table><thead><tr><th></th><th class="der">Tu cartera<br>(${fmtNum(pesoBolsa(pesosObjetivo(estado.datos.config)), 0)} % bolsa)</th><th class="der">Prudente<br>(${fmtNum(pesoBolsa(PRUDENTE), 0)} % bolsa)</th></tr></thead><tbody>
+        <tr><td>Rentabilidad media esperada</td><td class="der">${fmtPct(rA.rentEsperada, 1)}</td><td class="der">${fmtPct(rB.rentEsperada, 1)}</td></tr>
+        <tr><td>Escenario central (en € de hoy)</td><td class="der num">${fmtEur(real(rA.p50, rA), 0)}</td><td class="der num">${fmtEur(real(rB.p50, rB), 0)}</td></tr>
+        <tr><td>Escenario conservador (en € de hoy)</td><td class="der num">${fmtEur(real(rA.p10, rA), 0)}</td><td class="der num">${fmtEur(real(rB.p10, rB), 0)}</td></tr>
+        <tr><td>Caída máxima típica por el camino</td><td class="der">${fmtPct(rA.caidaTipica, 0)}</td><td class="der">${fmtPct(rB.caidaTipica, 0)}</td></tr>
+        <tr><td>Caída en un caso malo (1 de cada 10)</td><td class="der">${fmtPct(rA.caidaMala, 0)}</td><td class="der">${fmtPct(rB.caidaMala, 0)}</td></tr>
+        <tr><td>Probabilidad de acabar con menos de lo aportado</td><td class="der">${fmtPct(rA.probPerdida, 0)}</td><td class="der">${fmtPct(rB.probPerdida, 0)}</td></tr>
+      </tbody></table></div>
+      <p class="suave">Más bolsa suele dar más patrimonio a largo plazo, pero con caídas más profundas por el camino. La elección depende de cuánto puedas soportar sin vender.</p>` : '';
+    return `
+      <div class="escenarios">
+        ${fila('Conservador', 'Solo 1 de cada 10 simulaciones acaba peor · ' + fmtEur(real(rA.p10, rA), 0) + ' en € de hoy', rA.p10)}
+        ${fila('Central', 'La mitad acaba mejor y la mitad peor · ' + fmtEur(real(rA.p50, rA), 0) + ' en € de hoy', rA.p50)}
+        ${fila('Optimista', 'Solo 1 de cada 10 acaba mejor · ' + fmtEur(real(rA.p90, rA), 0) + ' en € de hoy', rA.p90)}
+      </div>
+      <div class="indicadores compacto" style="margin-top:10px">
+        <div class="ind"><div class="nombre">Dinero aportado</div><div class="valor num">${fmtEur(rA.aportado, 0)}</div></div>
+        <div class="ind"><div class="nombre">Ganancia en el escenario central</div><div class="valor num ${clase(rA.p50 - rA.aportado)}">${fmtEur(rA.p50 - rA.aportado, 0)}</div></div>
+        <div class="ind"><div class="nombre">Prob. de acabar con menos de lo aportado</div><div class="valor num">${fmtPct(rA.probPerdida, 0)}</div><div class="meta">${fmtPct(rA.probPerdidaReal, 0)} si se descuenta la inflación</div></div>
+        <div class="ind"><div class="nombre">Caída máxima típica por el camino</div><div class="valor num neg">${fmtPct(rA.caidaTipica, 0)}</div><div class="meta">en 1 de cada 10 casos: ${fmtPct(rA.caidaMala, 0)}</div></div>
+        ${par.retiro > 0 ? `<div class="ind"><div class="nombre">Prob. de agotar el dinero</div><div class="valor num">${fmtPct(rA.probAgotar, 0)}</div></div>` : ''}
+      </div>
+      <div class="grafico" style="height:280px;margin-top:12px"><canvas id="g-sim" aria-label="Proyección del patrimonio"></canvas></div>
+      <p class="suave">La banda sombreada va del escenario conservador al optimista. Importes en euros de cada año; «€ de hoy» descuenta una inflación del ${fmtNum(par.inflacion, 1)} %.</p>
+      ${comp}
+      <details class="hipotesis"><summary>Evolución año a año</summary>
+        <div class="tabla-scroll"><table><thead><tr><th>Año</th><th>Edad</th><th class="der">Aportado</th><th class="der">Conservador</th><th class="der">Central</th><th class="der">Optimista</th><th class="der">Central (€ de hoy)</th></tr></thead><tbody>
+        ${rA.porAnio.map(a => `<tr><td>${a.anio}</td><td>${a.edad}</td><td class="der num">${fmtEur(a.aportado, 0)}</td><td class="der num">${fmtEur(a.p10, 0)}</td><td class="der num">${fmtEur(a.p50, 0)}</td><td class="der num">${fmtEur(a.p90, 0)}</td><td class="der num">${fmtEur(a.p50real, 0)}</td></tr>`).join('')}
+        </tbody></table></div></details>
+      <h3>Prueba de resistencia: ¿y si llega una crisis?</h3>
+      <div class="doble formulario">
+        <label>Tipo de crisis<select id="c-tipo"><option value="gfc">${CRISIS.gfc.nombre}</option><option value="inflacion">${CRISIS.inflacion.nombre}</option><option value="decada">${CRISIS.decada.nombre}</option></select></label>
+        <label>¿Cuándo?<select id="c-cuando"><option value="jub">Justo antes de jubilarme (el peor momento)</option><option value="0">El primer año</option></select></label>
+      </div>
+      <div id="crisis-resultado" style="margin-top:10px"></div>
+      <p class="suave">Escenarios hipotéticos con caídas aproximadas inspiradas en crisis reales, aplicados sobre la trayectoria central. Sirven para ver el riesgo, no para predecirlo.</p>`;
+  }
+
+  function pintarCrisis(par) {
+    const cont = document.getElementById('crisis-resultado');
+    if (!cont) return;
+    const tipo = document.getElementById('c-tipo').value;
+    const cuando = document.getElementById('c-cuando').value;
+    const anio = cuando === 'jub' ? Math.max(0, Math.min(par.anios - 1, par.jub - par.edad - 1)) : 0;
+    const hip = leerHipotesis();
+    const a = simularCrisis(par, pesosObjetivo(estado.datos.config), hip, tipo, anio);
+    const b = simularCrisis(par, PRUDENTE, hip, tipo, anio);
+    const linea = (nombre, r) => `<tr><td>${nombre}</td><td class="der num">${r.decada ? '10 años sin ganancias en bolsa' : fmtPct(r.caida, 0)}</td><td class="der num">${fmtEur(r.sin, 0)}</td><td class="der num">${fmtEur(r.con, 0)}</td><td class="der num neg">${fmtEur(r.con - r.sin, 0)}</td></tr>`;
+    cont.innerHTML = `<div class="tabla-scroll"><table><thead><tr><th>Cartera</th><th class="der">Golpe</th><th class="der">Final sin crisis</th><th class="der">Final con crisis</th><th class="der">Diferencia</th></tr></thead><tbody>
+      ${linea('Tu cartera', a)}${linea('Prudente', b)}</tbody></table></div>
+      <p class="suave">Crisis en el año ${anio + 1} (a los ${par.edad + anio + 1} años de edad). Valores finales a ${par.anios} años, en euros de cada año.</p>`;
+  }
+
+  function ejecutarSimulacion(d) {
+    const cont = document.getElementById('sim-resultado');
+    if (!cont) return;
+    const par = paramsSimulador(d);
+    if (par.anios < 1 || par.capital < 0) return;
+    cont.innerHTML = '<div class="esqueleto" style="height:160px;margin-top:12px"></div>';
+    setTimeout(() => {
+      const hip = leerHipotesis();
+      const rA = simular(par, pesosObjetivo(d.config), hip, 2000);
+      const rB = simular(par, PRUDENTE, hip, 2000);
+      cont.innerHTML = htmlResultado(par, rA, rB);
+      graficoSimulacion(rA);
+      pintarCrisis(par);
+      document.getElementById('c-tipo').addEventListener('change', () => pintarCrisis(par));
+      document.getElementById('c-cuando').addEventListener('change', () => pintarCrisis(par));
+    }, 30);
+  }
+
+  function graficoSimulacion(r) {
+    const el = document.getElementById('g-sim');
+    if (!el) return;
+    if (!window.Chart) { el.parentNode.innerHTML = '<p class="vacio">El gráfico no ha podido cargarse (sin conexión).</p>'; return; }
+    if (estado.graficos['g-sim']) { try { estado.graficos['g-sim'].destroy(); } catch (e) {} }
+    const etiquetas = r.porAnio.map(a => a.edad + ' años');
+    const acento = colorVar('--acento');
+    estado.graficos['g-sim'] = new Chart(el, {
+      type: 'line',
+      data: {
+        labels: etiquetas,
+        datasets: [
+          { label: 'Conservador', data: r.porAnio.map(a => a.p10), borderColor: 'transparent', pointRadius: 0, fill: false },
+          { label: 'Optimista', data: r.porAnio.map(a => a.p90), borderColor: 'transparent', backgroundColor: 'rgba(212,160,23,.18)', pointRadius: 0, fill: '-1' },
+          { label: 'Central', data: r.porAnio.map(a => a.p50), borderColor: acento, borderWidth: 2.5, pointRadius: 0, fill: false },
+          { label: 'Aportado', data: r.porAnio.map(a => a.aportado), borderColor: colorVar('--texto-3'), borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, fill: false }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: { ticks: { color: colorVar('--texto-3'), maxTicksLimit: 6, font: { size: 11 } }, grid: { display: false } },
+          y: { ticks: { color: colorVar('--texto-3'), font: { size: 11 }, callback: v => fmtEur(v, 0) }, grid: { color: colorVar('--borde') } }
+        },
+        plugins: {
+          legend: { labels: { color: colorVar('--texto-2'), boxWidth: 12, font: { size: 11 }, filter: i => i.text !== 'Conservador' && i.text !== 'Optimista' } },
+          tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ' + fmtEur(ctx.raw, 0) } }
+        }
+      }
+    });
+  }
+
+  function vistaInformes(el, d) {
     el.innerHTML = `
-      ${bloqueProximamente('Asesor financiero conversacional', 'Fase 8', 'Podrás preguntarle cualquier cosa («¿Es buen momento para comprar oro?», «¿Qué pasa si la bolsa cae un 20 %?») y te responderá con los datos reales de la app, citando fuentes y separando hechos, estimaciones y opiniones. Usará la API de Claude o de Gemini desde el servidor, nunca desde el móvil.')}
+      ${tarjetaPerfil(d)}
+      ${tarjetaSimulador(d)}
       ${bloqueProximamente('Informe diario y «Mi decisión de inversión de hoy»', 'Fase 7', 'Cada mañana recibirás por correo y Telegram un informe que responde a las 8 preguntas de la memoria del proyecto y termina con una recomendación clara (o con un «hoy no hay una oportunidad suficientemente justificada»).')}
-      ${bloqueProximamente('Resumen semanal, informe mensual y perspectivas macro', 'Fase 7', 'Con historial de recomendaciones para comprobar después si acertaron.')}
-      ${bloqueProximamente('Simulador de patrimonio a 15-20 años con Monte Carlo', 'Fase 5', 'Escenarios conservador, central y optimista, inflación, comisiones y crisis prolongadas.')}
+      ${bloqueProximamente('Asesor financiero conversacional', 'Fase 8', 'Podrás preguntarle cualquier cosa («¿Es buen momento para comprar oro?», «¿Qué pasa si la bolsa cae un 20 %?») y te responderá con los datos reales de la app, citando fuentes y separando hechos, estimaciones y opiniones.')}
       <article class="tarjeta ancho"><h2>Aviso importante</h2>
         <p class="suave">Esta aplicación es una herramienta informativa y analítica de uso personal. No es un asesor financiero regulado ni ejecuta operaciones. Las rentabilidades pasadas no garantizan rentabilidades futuras.</p></article>
     `;
+    document.getElementById('f-sim').addEventListener('submit', ev => { ev.preventDefault(); ejecutarSimulacion(d); });
+    document.getElementById('btn-editar-perfil').addEventListener('click', modalAjustes);
+    ejecutarSimulacion(d);
   }
 
   /* ---------------- Modales ---------------- */
@@ -974,6 +1382,18 @@
           <label>Edad<input name="edad" type="number" min="18" max="100" value="${esc(cfg.edad)}"></label>
           <label>Horizonte (años)<input name="horizonte_anios" type="number" min="1" max="40" value="${esc(cfg.horizonte_anios)}"></label>
         </div>
+        <div class="doble">
+          <label>Gastos mensuales (€)<input name="gastos_mensuales" type="number" min="0" step="10" value="${esc(cfg.gastos_mensuales || '')}"></label>
+          <label>Meses de colchón<input name="meses_colchon" type="number" min="1" max="24" value="${esc(cfg.meses_colchon || 6)}"></label>
+        </div>
+        <div class="doble">
+          <label>Edad de jubilación<input name="edad_jubilacion" type="number" min="50" max="80" value="${esc(cfg.edad_jubilacion || 66)}"></label>
+          <label>Tolerancia a pérdidas<select name="tolerancia">${['Baja', 'Moderada', 'Alta'].map(t => `<option ${String(cfg.tolerancia || 'Moderada') === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+        </div>
+        <div class="doble">
+          <label>Aportación extra cada enero (€)<input name="aportacion_extra_anual" type="number" min="0" step="10" value="${esc(cfg.aportacion_extra_anual || 0)}"></label>
+          <label>Retirada mensual al jubilarte (€)<input name="retiro_mensual" type="number" min="0" step="10" value="${esc(cfg.retiro_mensual || 0)}"></label>
+        </div>
         <label>¿Tienes fondo de emergencia aparte?<select name="fondo_emergencia">
           <option ${String(cfg.fondo_emergencia).indexOf('S') === 0 ? 'selected' : ''}>Sí</option><option ${String(cfg.fondo_emergencia).indexOf('S') !== 0 ? 'selected' : ''}>No</option></select></label>
         <h3>Pesos objetivo (%) <span class="ayuda" id="suma-obj"></span></h3>
@@ -990,7 +1410,7 @@
           <button class="btn" type="button" id="btn-analisis">Actualizar análisis ahora</button>
           <button class="btn peligro" type="button" id="btn-desconectar">Olvidar este dispositivo</button>
         </div>
-        <p class="suave">Versión de la app: 1.2.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
+        <p class="suave">Versión de la app: 1.3.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
       </form>`, cuerpo => {
       const f = $('#f-ajustes', cuerpo);
       const suma = () => {
@@ -1010,7 +1430,8 @@
         if (estado.datos && f.querySelector('.obj')) {
           if (Math.abs(suma() - 100) > 0.01) { $('.error', f).textContent = 'Los pesos objetivo deben sumar 100 %.'; return; }
           const cfgNueva = {};
-          ['aportacion_mensual', 'capital_inicial', 'edad', 'horizonte_anios', 'fondo_emergencia'].forEach(k => { cfgNueva[k] = d[k]; });
+          ['aportacion_mensual', 'capital_inicial', 'edad', 'horizonte_anios', 'fondo_emergencia', 'gastos_mensuales', 'meses_colchon',
+           'edad_jubilacion', 'tolerancia', 'aportacion_extra_anual', 'retiro_mensual'].forEach(k => { cfgNueva[k] = d[k]; });
           cats.forEach(c => { cfgNueva['obj_' + c.id] = d['obj_' + c.id]; });
           enviarFormulario(f, 'guardarConfig', cfgNueva, 'Ajustes guardados');
         } else {
