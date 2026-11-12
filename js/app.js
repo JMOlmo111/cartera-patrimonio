@@ -38,7 +38,13 @@
     return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   };
   const leerLS = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
-  const guardarLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* sin almacenamiento */ } };
+  const guardarLS = (k, v) => {
+    try {
+      // Con PIN activado, la app no guarda en el móvil copias de tus datos financieros ni del chat
+      if ((k === CLAVE_CACHE || k === 'cp_chat') && localStorage.getItem('cp_seguro')) return;
+      localStorage.setItem(k, JSON.stringify(v));
+    } catch (e) { /* sin almacenamiento */ }
+  };
 
   function toast(msg) {
     const t = $('#toast');
@@ -77,7 +83,8 @@
       const r = await api(accion || 'resumen', datos);
       estado.datos = r;
       estado.deCache = false;
-      guardarLS(CLAVE_CACHE, { guardado: new Date().toISOString(), datos: r });
+      estado.ultimaSync = new Date().toISOString();
+      guardarLS(CLAVE_CACHE, { guardado: estado.ultimaSync, datos: r });
       $('#aviso-offline').hidden = true;
       pintar();
       if (mensajeOk) toast(mensajeOk);
@@ -103,7 +110,8 @@
 
   function actualizarSync() {
     const c = leerLS(CLAVE_CACHE);
-    $('#estado-sync').textContent = c ? (estado.deCache ? 'Sin conexión · ' : 'Actualizado ') + fmtFechaHora(c.guardado) : '—';
+    const cuando = c ? c.guardado : estado.ultimaSync;
+    $('#estado-sync').textContent = cuando ? (estado.deCache ? 'Sin conexión · ' : 'Actualizado ') + fmtFechaHora(cuando) : '—';
   }
 
   /* ---------------- Navegación ---------------- */
@@ -402,14 +410,17 @@
   }
 
   /* ================= Informes (Fase 7) ================= */
-  function htmlInforme(inf) {
+  function htmlInforme(inf, paraArchivo) {
     if (!inf) return '';
+    estado.informes = estado.informes || {};
+    estado.informes[inf.id] = inf;
     return `<div class="informe">
       <div class="decision"><div class="etq">Mi decisión de inversión de hoy</div>
         <div class="tit">${esc(inf.decision.titulo)}</div>
         ${inf.decision.parrafos.map(p => `<p>${esc(p)}</p>`).join('')}</div>
       ${inf.secciones.map(sec => `<h3>${sec.ia ? '✨ ' : ''}${esc(sec.titulo)}</h3>${sec.parrafos.filter(Boolean).map(p => `<p>${esc(p)}</p>`).join('')}`).join('')}
       <p class="suave">Generado el ${fmtFechaHora(inf.fecha)}. Fuentes: ${inf.fuentes.map(esc).join(' · ')}. ${esc(inf.aviso)}</p>
+      ${paraArchivo ? '' : `<button class="btn pequeno" data-descargar-informe="${esc(inf.id)}">Descargar informe</button>`}
     </div>`;
   }
 
@@ -888,6 +899,7 @@
           <button class="btn primario" data-accion="nuevo-activo">Añadir activo</button>
           <button class="btn" data-accion="operar" ${activos.length ? '' : 'disabled'}>Registrar operación</button>
           <button class="btn" data-accion="exportar">Exportar CSV</button>
+          <button class="btn" data-exportar-todo="1">Copia completa (JSON)</button>
         </div>
       </article>
 
@@ -1335,6 +1347,7 @@
     el.innerHTML = `
       ${tarjetaChat(d)}
       ${tarjetaInformes(d)}
+      ${tarjetaValidacion(d)}
       ${tarjetaPerfil(d)}
       ${tarjetaSimulador(d)}
 
@@ -1557,6 +1570,8 @@
         </div>
         <button class="btn" type="button" id="btn-prueba-alertas">Enviar mensaje de prueba</button>
         <label>Informe diario (8:30), semanal y mensual<select name="canal_informe">${['Correo + Telegram breve', 'Solo correo', 'Solo en la app'].map(t => `<option ${String(cfg.canal_informe || 'Correo + Telegram breve') === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+        <h3>Seguridad del dispositivo</h3>
+        ${htmlSeguridadAjustes()}
         <h3>Conexión</h3>
         <label>Dirección de la aplicación web<input name="url" type="url" value="${esc(con.url || '')}" required></label>
         <label>Código de acceso<input name="token" type="password" value="${esc(con.token || '')}" required minlength="20" autocomplete="off"></label>
@@ -1566,9 +1581,10 @@
           <button class="btn" type="button" id="btn-mercado">Actualizar datos de mercado</button>
           <button class="btn" type="button" id="btn-precios">Actualizar precios ahora</button>
           <button class="btn" type="button" id="btn-analisis">Actualizar análisis ahora</button>
+          <button class="btn" type="button" id="btn-estado">Comprobar estado del sistema</button>
           <button class="btn peligro" type="button" id="btn-desconectar">Olvidar este dispositivo</button>
         </div>
-        <p class="suave">Versión de la app: 1.6.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
+        <p class="suave">Versión de la app: 1.7.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
       </form>`, cuerpo => {
       const f = $('#f-ajustes', cuerpo);
       const suma = () => {
@@ -1584,7 +1600,7 @@
         aplicarTema(d.tema);
         const nuevaCon = { url: d.url.trim(), token: d.token.trim() };
         const cambioCon = nuevaCon.url !== con.url || nuevaCon.token !== con.token;
-        if (cambioCon) { estado.conexion = nuevaCon; guardarLS(CLAVE_CONEXION, nuevaCon); }
+        if (cambioCon) await guardarConexion(nuevaCon);
         if (estado.datos && f.querySelector('.obj')) {
           if (Math.abs(suma() - 100) > 0.01) { $('.error', f).textContent = 'Los pesos objetivo deben sumar 100 %.'; return; }
           const cfgNueva = {};
@@ -1608,6 +1624,8 @@
         catch (e) { $('.error', f).textContent = e.message; }
         finally { ev.target.disabled = false; }
       });
+      enlazarSeguridadAjustes(cuerpo, f);
+      $('#btn-estado', cuerpo).addEventListener('click', mostrarEstadoSistema);
       $('#btn-prueba-alertas', cuerpo).addEventListener('click', async ev => {
         ev.target.disabled = true; ev.target.textContent = 'Enviando…';
         try { const r = await cargar('probarAlertas', null); toast('Prueba enviada por: ' + (r.prueba_alertas || []).join(' y ')); }
@@ -1622,7 +1640,7 @@
       });
       $('#btn-desconectar', cuerpo).addEventListener('click', () => {
         if (!confirm('Se borrarán la conexión y los datos guardados en este dispositivo (no los del servidor).')) return;
-        try { localStorage.removeItem(CLAVE_CONEXION); localStorage.removeItem(CLAVE_CACHE); } catch (e) {}
+        [CLAVE_CONEXION, CLAVE_CACHE, CLAVE_SEGURO, 'cp_chat'].forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
         location.reload();
       });
     });
@@ -1654,6 +1672,171 @@
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
+  /* ---------------- Seguridad del dispositivo (Fase 9) ---------------- */
+  const CLAVE_SEGURO = 'cp_seguro';
+  const b64 = u => btoa(String.fromCharCode.apply(null, u));
+  const deB64 = t => Uint8Array.from(atob(t), c => c.charCodeAt(0));
+  const pinActivo = () => { try { return !!localStorage.getItem(CLAVE_SEGURO); } catch (e) { return false; } };
+
+  async function derivarClave(pin, sal) {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: sal, iterations: 250000, hash: 'SHA-256' }, base,
+      { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+  async function cifrarObj(obj, clave) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, clave, new TextEncoder().encode(JSON.stringify(obj)));
+    return { iv: b64(iv), ct: b64(new Uint8Array(ct)) };
+  }
+  async function descifrarObj(c, clave) {
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: deB64(c.iv) }, clave, deB64(c.ct));
+    return JSON.parse(new TextDecoder().decode(pt));
+  }
+  async function guardarConexion(con) {
+    estado.conexion = con;
+    if (estado.clavePin && pinActivo()) {
+      const sg = leerLS(CLAVE_SEGURO);
+      sg.con = await cifrarObj(con, estado.clavePin);
+      guardarLS(CLAVE_SEGURO, sg);
+    } else guardarLS(CLAVE_CONEXION, con);
+  }
+  async function activarPin(pin) {
+    if (!window.crypto || !crypto.subtle) throw new Error('Este navegador no permite el cifrado necesario.');
+    const sal = crypto.getRandomValues(new Uint8Array(16));
+    const clave = await derivarClave(pin, sal);
+    guardarLS(CLAVE_SEGURO, { sal: b64(sal), con: await cifrarObj(estado.conexion, clave) });
+    estado.clavePin = clave;
+    [CLAVE_CONEXION, CLAVE_CACHE, 'cp_chat'].forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+  }
+  function desactivarPin() {
+    try { localStorage.removeItem(CLAVE_SEGURO); } catch (e) {}
+    estado.clavePin = null;
+    guardarLS(CLAVE_CONEXION, estado.conexion);
+  }
+
+  function mostrarPin(alDesbloquear) {
+    document.querySelectorAll('.vista').forEach(v => { v.hidden = true; });
+    $('.navegacion').hidden = true;
+    $('#titulo-pantalla').textContent = 'Cartera Patrimonio';
+    let sec = $('#v-pin');
+    if (!sec) { sec = document.createElement('section'); sec.id = 'v-pin'; sec.className = 'vista'; $('#contenido').appendChild(sec); }
+    sec.hidden = false;
+    sec.innerHTML = `<div class="tarjeta bienvenida pin-tarjeta">
+      <h2>🔒 Introduce tu PIN</h2>
+      <form id="f-pin" class="formulario">
+        <input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="8" autocomplete="off" aria-label="PIN" required>
+        <button class="btn primario" type="submit">Desbloquear</button>
+        <p class="error" role="alert"></p>
+        <button type="button" class="btn pequeno peligro" id="pin-olvido">He olvidado el PIN</button>
+      </form></div>`;
+    const f = $('#f-pin'), err = $('.error', f);
+    let fallos = 0;
+    setTimeout(() => { try { $('#pin').focus(); } catch (e) {} }, 100);
+    f.addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const btn = f.querySelector('[type=submit]'); btn.disabled = true; err.textContent = '';
+      try {
+        const sg = leerLS(CLAVE_SEGURO);
+        const clave = await derivarClave($('#pin').value, deB64(sg.sal));
+        estado.conexion = await descifrarObj(sg.con, clave);
+        estado.clavePin = clave;
+        sec.hidden = true; sec.innerHTML = '';
+        $('.navegacion').hidden = false;
+        alDesbloquear();
+      } catch (e) {
+        fallos++;
+        $('#pin').value = '';
+        const espera = fallos >= 5 ? Math.min(300, 30 * Math.pow(2, fallos - 5)) : 0;
+        err.textContent = 'PIN incorrecto.' + (espera ? ' Espera ' + espera + ' segundos.' : '');
+        if (espera) { setTimeout(() => { btn.disabled = false; err.textContent = ''; }, espera * 1000); return; }
+      }
+      btn.disabled = false;
+    });
+    $('#pin-olvido').addEventListener('click', () => {
+      if (!confirm('Se borrará el acceso guardado en este móvil. Tendrás que volver a pegar la dirección de la app web y tu código de acceso. Tus datos del servidor no se tocan.')) return;
+      [CLAVE_SEGURO, CLAVE_CONEXION, CLAVE_CACHE, 'cp_chat'].forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+      location.reload();
+    });
+  }
+
+  function htmlSeguridadAjustes() {
+    return pinActivo()
+      ? `<p>🔒 <strong>PIN activado.</strong> Tu acceso está cifrado en este dispositivo y la app se bloquea tras 5 minutos en segundo plano. No se guardan copias de tus datos en el móvil.</p>
+         <button class="btn" type="button" id="btn-quitar-pin">Desactivar PIN</button>`
+      : `<p class="suave">Protege la app con un PIN de 4 a 8 cifras. El acceso guardado en el móvil quedará cifrado (AES-256) y no se guardarán copias de tus datos.</p>
+         <div class="doble"><label>Nuevo PIN<input id="pin-1" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="8" autocomplete="new-password"></label>
+         <label>Repite el PIN<input id="pin-2" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="8" autocomplete="new-password"></label></div>
+         <button class="btn" type="button" id="btn-poner-pin">Activar PIN</button>`;
+  }
+
+  function enlazarSeguridadAjustes(cuerpo, f) {
+    const poner = $('#btn-poner-pin', cuerpo), quitar = $('#btn-quitar-pin', cuerpo);
+    if (poner) poner.addEventListener('click', async () => {
+      const a = $('#pin-1', cuerpo).value, b = $('#pin-2', cuerpo).value;
+      if (!/^\d{4,8}$/.test(a)) { $('.error', f).textContent = 'El PIN debe tener entre 4 y 8 cifras.'; return; }
+      if (a !== b) { $('.error', f).textContent = 'Los dos PIN no coinciden.'; return; }
+      if (/^(\d)\1+$/.test(a) || '0123456789'.indexOf(a) >= 0 || '9876543210'.indexOf(a) >= 0) { $('.error', f).textContent = 'Elige un PIN menos evidente (no repetido ni consecutivo).'; return; }
+      try { await activarPin(a); cerrarModal(); toast('PIN activado'); } catch (e) { $('.error', f).textContent = e.message; }
+    });
+    if (quitar) quitar.addEventListener('click', () => {
+      if (!confirm('¿Desactivar el PIN? El acceso volverá a guardarse sin cifrar en este dispositivo.')) return;
+      desactivarPin(); cerrarModal(); toast('PIN desactivado');
+    });
+  }
+
+  async function mostrarEstadoSistema() {
+    abrirModal('Estado del sistema', '<div class="esqueleto"></div><p class="suave">Comprobando… (unos segundos)</p>');
+    try {
+      const r = await api('diagnostico');
+      const icono = e => e === 'ok' ? '✅' : (e === 'aviso' ? '⚠️' : '❌');
+      abrirModal('Estado del sistema', `
+        <p><strong>${r.resumen.ok} correctos · ${r.resumen.avisos} avisos · ${r.resumen.errores} errores</strong></p>
+        <ul class="diagnostico">${r.checks.map(c => `<li class="d-${esc(c.estado)}"><span>${icono(c.estado)}</span><div><small>${esc(c.area)}</small>${esc(c.texto)}</div></li>`).join('')}</ul>
+        <p class="suave">Comprobado el ${fmtFechaHora(r.fecha)} · servidor ${esc(r.version)}. Si algo falla, el sistema te avisa automáticamente cada día a las 12:00.</p>`);
+    } catch (e) { abrirModal('Estado del sistema', `<p class="error">${esc(e.message)}</p>`); }
+  }
+
+  function descargar(nombre, contenido, tipo) {
+    const url = URL.createObjectURL(new Blob([contenido], { type: tipo }));
+    const a = document.createElement('a');
+    a.href = url; a.download = nombre;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  async function exportarTodo() {
+    toast('Preparando la copia…');
+    try {
+      const r = await api('exportar');
+      descargar('cartera-patrimonio-copia-' + hoyISO() + '.json', JSON.stringify(r, null, 2), 'application/json');
+    } catch (e) { toast(e.message); }
+  }
+
+  function descargarInforme(inf) {
+    const html = '<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + esc(inf.titulo) + '</title>' +
+      '<style>body{font-family:Arial,sans-serif;max-width:720px;margin:24px auto;padding:0 16px;color:#0F1A2E;line-height:1.5}.decision{background:#F6EBCF;border:1px solid #B8860B;border-radius:12px;padding:12px 16px}.etq{font-size:12px;font-weight:bold;letter-spacing:.06em;text-transform:uppercase;color:#8A6400}.tit{font-weight:bold;font-size:17px;margin:4px 0}h3{margin:18px 0 4px}.suave{color:#6B7588;font-size:13px}</style></head><body>' +
+      '<h1>' + esc(inf.titulo) + '</h1>' + htmlInforme(inf, true) + '</body></html>';
+    descargar(inf.id.replace(/[^\w-]/g, '-') + '.html', html, 'text/html');
+  }
+
+  function tarjetaValidacion(d) {
+    const v = d.validacion;
+    if (!v) return '';
+    const nombres = { ORO: 'Oro', RV_DES: 'RV desarrollados', RV_EME: 'RV emergentes', BONOS: 'Bonos', REITS: 'REITs' };
+    return `<article class="tarjeta ancho"><h2>¿Aciertan las señales?</h2>
+      <p class="suave">Historial de decisiones y resultados: qué pasó con el precio 30 días después de cada evaluación del semáforo. Sirve para comprobar con honestidad si el motor aporta valor.</p>
+      ${!v.disponible ? `<p class="vacio">Aún no hay señales con 30 días de antigüedad. Los primeros resultados estarán disponibles a partir del ${fmtFecha(v.disponible_desde)}.</p>` : `
+        <div class="indicadores compacto">
+          <div class="ind"><div class="nombre">Tras señales de compra</div><div class="valor num">${v.resumen.compra ? fmtVar(v.resumen.compra.media, 1) : '—'}</div><div class="meta">${v.resumen.compra ? v.resumen.compra.n + ' casos, media a 30 días' : 'sin casos todavía'}</div></div>
+          <div class="ind"><div class="nombre">Tras el resto de señales</div><div class="valor num">${v.resumen.resto ? fmtVar(v.resumen.resto.media, 1) : '—'}</div><div class="meta">${v.resumen.resto ? v.resumen.resto.n + ' casos, media a 30 días' : ''}</div></div>
+        </div>
+        <div class="tabla-scroll"><table><thead><tr><th>Fecha</th><th>Activo</th><th>Señal</th><th class="der">Punt.</th><th class="der">30 días después</th></tr></thead><tbody>
+        ${v.filas.slice(0, 20).map(x => `<tr><td>${fmtFecha(x.fecha)}</td><td>${esc(nombres[x.activo] || x.activo)}</td><td>${esc(x.estado.toLowerCase())}</td><td class="der">${esc(x.puntuacion)}</td><td class="der num">${fmtVar(x.var30, 1)}</td></tr>`).join('')}
+        </tbody></table></div>
+        <p class="suave">Con pocos casos, los resultados pueden deberse al azar. Hacen falta muchos meses para sacar conclusiones.</p>`}
+    </article>`;
+  }
+
   /* ---------------- Arranque ---------------- */
   function mostrarConexion() {
     document.querySelectorAll('.vista').forEach(v => { v.hidden = true; });
@@ -1668,7 +1851,7 @@
       const btn = f.querySelector('button'); btn.disabled = true; $('#conexion-error').textContent = '';
       try {
         await api('ping');
-        guardarLS(CLAVE_CONEXION, estado.conexion);
+        await guardarConexion(estado.conexion);
         $('.navegacion').hidden = false;
         $('#v-conexion').hidden = true;
         irA('patrimonio');
@@ -1690,6 +1873,9 @@
       if (ev.target.closest('[data-metodologia]')) { modalMetodologia(); return; }
       const ir = ev.target.closest('[data-ir]');
       if (ir) { irA(ir.dataset.ir); return; }
+      const di = ev.target.closest('[data-descargar-informe]');
+      if (di) { const x = (estado.informes || {})[di.dataset.descargarInforme]; if (x) descargarInforme(x); return; }
+      if (ev.target.closest('[data-exportar-todo]')) { exportarTodo(); return; }
       const inf = ev.target.closest('[data-informe]');
       if (inf) {
         abrirModal('Informe', '<div class="esqueleto"></div>');
@@ -1700,9 +1886,20 @@
     });
     $('#btn-refrescar').addEventListener('click', () => { if (estado.conexion) cargar('resumen', null, 'Datos actualizados').catch(() => {}); });
 
+    // Bloqueo automático: si la app pasa más de 5 minutos en segundo plano con PIN, se vuelve a pedir
+    let ocultaDesde = 0;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') ocultaDesde = Date.now();
+      else if (pinActivo() && estado.clavePin && ocultaDesde && Date.now() - ocultaDesde > 5 * 60 * 1000) location.reload();
+    });
+
+    if (pinActivo()) { mostrarPin(arrancar); return; }
     estado.conexion = leerLS(CLAVE_CONEXION);
     if (!estado.conexion || !estado.conexion.url) { mostrarConexion(); return; }
+    arrancar();
+  }
 
+  function arrancar() {
     const inicial = (location.hash || '').replace('#', '');
     estado.vista = TITULOS[inicial] ? inicial : 'patrimonio';
     const c = leerLS(CLAVE_CACHE);
