@@ -324,3 +324,12 @@ input.mini { width: 80px; min-height: 38px; padding: 6px 8px; text-align: right;
 .chip-btn:hover { border-color: var(--primario); }
 .chat-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin-top: 8px; }
 .chat-form textarea { resize: none; min-height: 48px; }
+
+/* ---------- Fase 9: seguridad y diagnóstico ---------- */
+.pin-tarjeta { max-width: 420px; margin: 8vh auto 0; text-align: center; }
+.pin-tarjeta input { text-align: center; font-size: 1.6rem; letter-spacing: .5em; }
+.diagnostico { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 8px; }
+.diagnostico li { display: grid; grid-template-columns: 24px 1fr; gap: 8px; padding: 10px 12px; border-radius: 12px; background: var(--superficie-2); font-size: .9rem; }
+.diagnostico li.d-error { background: color-mix(in srgb, #D2443A 10%, var(--superficie)); }
+.diagnostico li.d-aviso { background: var(--aviso-fondo); }
+.diagnostico small { display: block; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-3); }
