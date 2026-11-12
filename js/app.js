@@ -408,7 +408,7 @@
       <div class="decision"><div class="etq">Mi decisión de inversión de hoy</div>
         <div class="tit">${esc(inf.decision.titulo)}</div>
         ${inf.decision.parrafos.map(p => `<p>${esc(p)}</p>`).join('')}</div>
-      ${inf.secciones.map(sec => `<h3>${esc(sec.titulo)}</h3>${sec.parrafos.filter(Boolean).map(p => `<p>${esc(p)}</p>`).join('')}`).join('')}
+      ${inf.secciones.map(sec => `<h3>${sec.ia ? '✨ ' : ''}${esc(sec.titulo)}</h3>${sec.parrafos.filter(Boolean).map(p => `<p>${esc(p)}</p>`).join('')}`).join('')}
       <p class="suave">Generado el ${fmtFechaHora(inf.fecha)}. Fuentes: ${inf.fuentes.map(esc).join(' · ')}. ${esc(inf.aviso)}</p>
     </div>`;
   }
@@ -434,6 +434,94 @@
           <span class="luz ${x.tipo === 'diario' ? 'amarillo' : 'verde'}" aria-hidden="true"></span>
           <span class="fs-nombre">${esc(x.titulo)}<small>${esc(x.decision)}</small></span><span></span></button>`).join('')}</div>` : ''}
     </article>`;
+  }
+
+  /* ================= Asesor conversacional (Fase 8) ================= */
+  const CLAVE_CHAT = 'cp_chat';
+  const SUGERENCIAS = ['¿Es buen momento para comprar oro?', '¿Por qué está cayendo la bolsa?', '¿Qué está pasando con el dólar?',
+    '¿Me conviene invertir mis 300 € mensuales ahora?', '¿Qué fondo indexado es más interesante?', '¿Qué ocurriría si la bolsa cae un 20 %?',
+    '¿Debo aumentar mi posición en oro?', '¿Cómo afecta una subida de tipos a mis inversiones?'];
+
+  function formatoIA(t) {
+    const lineas = esc(t).split('\n');
+    let html = '', enLista = false;
+    lineas.forEach(l => {
+      let x = l.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\[(Hecho|Estimación|Escenario|Opinión analítica)\]/g, (m, e) => `<span class="etq-ia ${e === 'Hecho' ? 'hecho' : (e === 'Estimación' ? 'estim' : (e === 'Escenario' ? 'escen' : 'opin'))}">${e}</span>`);
+      const li = /^\s*[-•*]\s+(.*)/.exec(x) || /^\s*\d+[.)]\s+(.*)/.exec(x);
+      if (li) { if (!enLista) { html += '<ul>'; enLista = true; } html += `<li>${li[1]}</li>`; return; }
+      if (enLista) { html += '</ul>'; enLista = false; }
+      if (/^#{1,4}\s+/.test(x)) { html += `<h4>${x.replace(/^#{1,4}\s+/, '')}</h4>`; return; }
+      if (x.trim()) html += `<p>${x}</p>`;
+    });
+    if (enLista) html += '</ul>';
+    return html;
+  }
+
+  function leerChat() { const c = leerLS(CLAVE_CHAT); return Array.isArray(c) ? c : []; }
+
+  function htmlMensajes(lista) {
+    return lista.map(m => m.rol === 'usuario'
+      ? `<div class="msg yo">${esc(m.texto)}</div>`
+      : `<div class="msg ia">${formatoIA(m.texto)}<div class="pie">${esc(m.modelo || '')} · ${fmtFechaHora(m.fecha)}</div></div>`).join('');
+  }
+
+  function tarjetaChat(d) {
+    const ia = d.ia || {};
+    if (!ia.configurado) {
+      return `<article class="tarjeta ancho"><h2>Asesor conversacional</h2><div class="aviso info"><span>Falta conectar la IA: añade la clave ANTHROPIC_API_KEY en Apps Script (Fase 8, paso 2).</span></div></article>`;
+    }
+    const lista = leerChat();
+    return `<article class="tarjeta ancho chat-tarjeta">
+      <h2>Pregunta a tu asesor ${lista.length ? '<button class="btn pequeno" id="btn-borrar-chat">Nueva conversación</button>' : ''}</h2>
+      <div class="chat" id="chat-mensajes">${lista.length ? htmlMensajes(lista) : `<p class="suave">Pregunta lo que quieras sobre tus inversiones o los mercados. Responderá con los datos reales de la app, citando fuentes y separando <span class="etq-ia hecho">Hecho</span> <span class="etq-ia estim">Estimación</span> <span class="etq-ia escen">Escenario</span> <span class="etq-ia opin">Opinión analítica</span>.</p>`}</div>
+      <div class="sugerencias">${SUGERENCIAS.map(q => `<button class="chip-btn" data-sugerencia="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+      <form id="f-chat" class="chat-form">
+        <textarea id="chat-texto" rows="2" maxlength="1200" placeholder="Escribe tu pregunta…" aria-label="Tu pregunta"></textarea>
+        <button class="btn primario" type="submit" aria-label="Enviar">Enviar</button>
+      </form>
+      <p class="suave" id="chat-uso">${esc(ia.modelo)} · este mes: ${esc(ia.llamadas)} consultas, ≈ ${fmtEur(ia.coste_eur, 2)}. Orientación analítica, no asesoramiento financiero regulado.</p>
+    </article>`;
+  }
+
+  function enlazarChat(d) {
+    const f = document.getElementById('f-chat');
+    if (!f) return;
+    const cont = document.getElementById('chat-mensajes');
+    const txt = document.getElementById('chat-texto');
+    const enviar = async pregunta => {
+      pregunta = String(pregunta || '').trim();
+      if (!pregunta) return;
+      const lista = leerChat();
+      const historial = lista.slice(-6).map(m => ({ rol: m.rol, texto: m.texto }));
+      lista.push({ rol: 'usuario', texto: pregunta, fecha: new Date().toISOString() });
+      guardarLS(CLAVE_CHAT, lista.slice(-20));
+      cont.innerHTML = htmlMensajes(lista) + '<div class="msg ia pensando">Analizando tus datos…</div>';
+      cont.lastElementChild.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      txt.value = ''; f.querySelector('button').disabled = true;
+      try {
+        const r = await api('preguntarIA', { pregunta: pregunta, historial: historial });
+        lista.push({ rol: 'asistente', texto: r.respuesta, modelo: r.modelo, fecha: r.fecha });
+        guardarLS(CLAVE_CHAT, lista.slice(-20));
+        if (estado.datos) estado.datos.ia = r.uso;
+        const uso = document.getElementById('chat-uso');
+        if (uso && r.uso) uso.textContent = r.uso.modelo + ' · este mes: ' + r.uso.llamadas + ' consultas, ≈ ' + fmtEur(r.uso.coste_eur, 2) + '. Orientación analítica, no asesoramiento financiero regulado.';
+        cont.innerHTML = htmlMensajes(lista);
+      } catch (e) {
+        lista.pop(); guardarLS(CLAVE_CHAT, lista);
+        cont.innerHTML = htmlMensajes(lista) + `<div class="msg ia error-msg">${esc(e.message)}</div>`;
+        txt.value = pregunta;
+      } finally {
+        f.querySelector('button').disabled = false;
+        const ult = cont.querySelector('.msg.ia:last-child');
+        if (ult) ult.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    };
+    f.addEventListener('submit', ev => { ev.preventDefault(); enviar(txt.value); });
+    txt.addEventListener('keydown', ev => { if (ev.key === 'Enter' && !ev.shiftKey && window.matchMedia('(min-width: 720px)').matches) { ev.preventDefault(); enviar(txt.value); } });
+    document.querySelectorAll('[data-sugerencia]').forEach(b => b.addEventListener('click', () => enviar(b.dataset.sugerencia)));
+    const borrar = document.getElementById('btn-borrar-chat');
+    if (borrar) borrar.addEventListener('click', () => { try { localStorage.removeItem(CLAVE_CHAT); } catch (e) {} pintar(); });
   }
 
   /* ================= PANTALLA 1 · MI PATRIMONIO ================= */
@@ -1245,16 +1333,18 @@
 
   function vistaInformes(el, d) {
     el.innerHTML = `
+      ${tarjetaChat(d)}
       ${tarjetaInformes(d)}
       ${tarjetaPerfil(d)}
       ${tarjetaSimulador(d)}
 
-      ${bloqueProximamente('Asesor financiero conversacional', 'Fase 8', 'Podrás preguntarle cualquier cosa («¿Es buen momento para comprar oro?», «¿Qué pasa si la bolsa cae un 20 %?») y te responderá con los datos reales de la app, citando fuentes y separando hechos, estimaciones y opiniones.')}
+
       <article class="tarjeta ancho"><h2>Aviso importante</h2>
         <p class="suave">Esta aplicación es una herramienta informativa y analítica de uso personal. No es un asesor financiero regulado ni ejecuta operaciones. Las rentabilidades pasadas no garantizan rentabilidades futuras.</p></article>
     `;
     document.getElementById('f-sim').addEventListener('submit', ev => { ev.preventDefault(); ejecutarSimulacion(d); });
     document.getElementById('btn-editar-perfil').addEventListener('click', modalAjustes);
+    enlazarChat(d);
     document.getElementById('btn-generar-informe').addEventListener('click', async ev => {
       ev.target.disabled = true; ev.target.textContent = 'Generando…';
       try { await cargar('generarInforme', { tipo: 'diario' }, 'Informe generado'); }
@@ -1478,7 +1568,7 @@
           <button class="btn" type="button" id="btn-analisis">Actualizar análisis ahora</button>
           <button class="btn peligro" type="button" id="btn-desconectar">Olvidar este dispositivo</button>
         </div>
-        <p class="suave">Versión de la app: 1.5.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
+        <p class="suave">Versión de la app: 1.6.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
       </form>`, cuerpo => {
       const f = $('#f-ajustes', cuerpo);
       const suma = () => {
