@@ -304,3 +304,23 @@ input.mini { width: 80px; min-height: 38px; padding: 6px 8px; text-align: right;
 .informe h3 { margin: 16px 0 4px; }
 .informe p { font-size: .92rem; }
 .enlace { background: none; border: 0; padding: 0; color: var(--primario); font: inherit; text-decoration: underline; cursor: pointer; }
+
+/* ---------- Fase 8: asesor conversacional ---------- */
+.chat { display: grid; gap: 10px; max-height: 60vh; overflow-y: auto; padding: 4px 2px; }
+.msg { padding: 10px 14px; border-radius: 16px; font-size: .93rem; max-width: 92%; }
+.msg p { margin: 4px 0; } .msg ul { margin: 4px 0; padding-left: 20px; } .msg h4 { margin: 8px 0 2px; font-size: .95rem; }
+.msg.yo { justify-self: end; background: var(--primario); color: var(--primario-texto); border-bottom-right-radius: 4px; }
+.msg.ia { justify-self: start; background: var(--superficie-2); border-bottom-left-radius: 4px; }
+.msg.ia .pie { font-size: .72rem; color: var(--texto-3); margin-top: 6px; }
+.msg.pensando { color: var(--texto-3); font-style: italic; animation: brillo 1.4s infinite; }
+.msg.error-msg { color: var(--negativo); }
+.etq-ia { display: inline-block; font-size: .7rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; margin-right: 4px; vertical-align: 1px; }
+.etq-ia.hecho { background: color-mix(in srgb, #1E4FB5 15%, var(--superficie)); color: var(--primario); }
+.etq-ia.estim { background: var(--acento-suave); color: var(--acento); }
+.etq-ia.escen { background: color-mix(in srgb, #7A5AF8 15%, var(--superficie)); color: #7A5AF8; }
+.etq-ia.opin { background: color-mix(in srgb, #E0703A 15%, var(--superficie)); color: #C2571F; }
+.sugerencias { display: flex; gap: 8px; overflow-x: auto; padding: 10px 0 4px; -webkit-overflow-scrolling: touch; }
+.chip-btn { flex: 0 0 auto; border: 1px solid var(--borde); background: var(--superficie); color: var(--texto); border-radius: 999px; padding: 8px 12px; font: inherit; font-size: .84rem; cursor: pointer; min-height: 40px; }
+.chip-btn:hover { border-color: var(--primario); }
+.chat-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin-top: 8px; }
+.chat-form textarea { resize: none; min-height: 48px; }
