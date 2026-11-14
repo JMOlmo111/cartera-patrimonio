@@ -625,6 +625,10 @@
       filas.push(m ? `<div class="ind"><div class="nombre">${esc(r.nombre)}</div><div class="valor num">${fmtNum(m.cierre, 2)} <small style="font-size:.75rem">${fmtVar(m.var_1d)}</small></div><div class="meta">Cierre del ${fmtFecha(m.fecha)} · 1 año: ${fmtVar(m.var_1a, 1)}</div></div>`
         : `<div class="ind no-disp"><div class="nombre">${esc(r.nombre)}</div><div class="valor">Dato no disponible</div><div class="meta">${esc(String(r.estado).replace('NO DISPONIBLE: ', ''))}</div></div>`);
     });
+    if (pr.cripto && pr.cripto.metricas) {
+      const m = pr.cripto.metricas;
+      filas.push(`<div class="ind"><div class="nombre">Bitcoin (en euros)</div><div class="valor num">${fmtEur(m.cierre, 0)} <small style="font-size:.75rem">${fmtVar(m.var_1d)}</small></div><div class="meta">Cierre del ${fmtFecha(m.fecha)} · 1 año: ${fmtVar(m.var_1a, 1)}</div></div>`);
+    }
     return `<article class="tarjeta ancho"><h2>Mercados hoy</h2>${avisoPrecios(pr)}<div class="indicadores">${filas.join('')}</div>${pr.configurado ? piePrecios(pr) : ''}</article>`;
   }
 
@@ -760,9 +764,34 @@
   }
 
   /* ================= PANTALLA 3 · FONDOS ================= */
-  const NOMBRE_CAT = { RV_DES: 'Renta variable desarrollados / global', RV_EME: 'Renta variable emergentes', ORO: 'Oro', BONOS: 'Bonos gubernamentales', REITS: 'REITs (inmobiliario)', LIQUIDEZ: 'Liquidez' };
+  const NOMBRE_CAT = { RV_DES: 'Renta variable desarrollados / global', RV_EME: 'Renta variable emergentes', ORO: 'Oro', BONOS: 'Bonos gubernamentales', REITS: 'REITs (inmobiliario)', CRIPTO: 'Criptomonedas', LIQUIDEZ: 'Liquidez' };
 
   const ELECCION = ['IE00B4L5Y983', 'IE00BKM4GZ66'];
+
+  /** Tarjeta de bitcoin en la pantalla Fondos (v1.8.0). */
+  function tarjetaCripto(d) {
+    const pr = d.precios || {};
+    const cr = pr.cripto;
+    const a = senal(d, 'CRIPTO');
+    const cat = d.cartera.categorias.find(c => c.id === 'CRIPTO');
+    if (!cr && !a && !(cat && cat.objetivo)) return '';
+    const m = cr ? cr.metricas : null;
+    return `<article class="tarjeta ancho">
+      <h2>Criptomonedas: bitcoin</h2>
+      ${m ? `<div class="indicadores compacto">
+        <div class="ind"><div class="nombre">Precio (en euros)</div><div class="valor num">${fmtEur(m.cierre, 0)}</div><div class="meta">Cierre del ${fmtFecha(m.fecha)}</div></div>
+        <div class="ind"><div class="nombre">1 semana</div><div class="valor num">${fmtVar(m.var_1s, 1)}</div></div>
+        <div class="ind"><div class="nombre">1 mes</div><div class="valor num">${fmtVar(m.var_1m, 1)}</div></div>
+        <div class="ind"><div class="nombre">Desde su máximo</div><div class="valor num">${fmtVar(m.desde_maximo, 1)}</div><div class="meta">Máximo ${fmtEur(m.maximo, 0)} (${fmtFecha(m.fecha_maximo)})</div></div>
+      </div>
+      <div class="grafico"><canvas id="g-btc" aria-label="Evolución de bitcoin en euros"></canvas></div>`
+      : `<p class="vacio">Precio de bitcoin aún no disponible: se descarga en la próxima actualización de precios.</p>`}
+      ${cat ? `<p>En tu cartera: <strong class="num">${fmtEur(cat.valor, 0)}</strong> <span class="suave">(${fmtPct(cat.actual, 1)} · objetivo ${fmtPct(cat.objetivo, 0)})</span></p>` : ''}
+      ${a ? `<div class="tarjeta-interior">${htmlSenal(a, false)}</div>` : '<p class="vacio">Aún no hay análisis de bitcoin. Se calcula cada día laborable a las 22:00.</p>'}
+      <div class="aviso info">Bitcoin es el activo más volátil de tu cartera: ha llegado a caer más de un 75 % desde máximos. Por eso su peso es pequeño y la app nunca da para él una señal más favorable que «compra progresiva».</div>
+      ${cr ? '<p class="suave">Fuente: EODHD (BTC-EUR, cierre diario a las 00:00 UTC). Bitcoin cotiza todos los días, también en fin de semana.</p>' : ''}
+    </article>`;
+  }
 
   function vistaFondos(el, d) {
     const rv = d.cartera.categorias.filter(c => c.id === 'RV_DES' || c.id === 'RV_EME');
@@ -770,7 +799,7 @@
     const indices = pr.referencias.filter(r => r.grupo === 'indice');
     const selIdx = estado.indiceSel && pr.graficos[estado.indiceSel] ? estado.indiceSel : (Object.keys(pr.graficos)[0] || '');
     const cat = d.catalogo || { productos: [], notas: [] };
-    const tengo = isin => d.cartera.posiciones.some(p => p.isin && p.isin === isin);
+    const tengo = p => d.cartera.posiciones.some(x => p.isin ? x.isin === p.isin : (x.categoria === p.categoria && x.nombre === p.nombre));
 
     const grupos = Object.keys(NOMBRE_CAT).map(k => {
       const prods = cat.productos.filter(p => p.categoria === k);
@@ -787,7 +816,7 @@
           <div style="font-size:.86rem"><span class="neg">!</span> ${p.contras.map(esc).join('<br><span class="neg">!</span> ')}</div>
           <div class="botonera">
             ${ELECCION.indexOf(p.isin) >= 0 ? '<span class="chip bien">Tu elección (opción A)</span>' : ''}
-            ${p.isin ? (tengo(p.isin) ? '<span class="chip ok">Ya está en tu cartera</span>' : `<button class="btn pequeno" data-alta="${esc(p.isin)}">Añadir a mi cartera</button>`) : ''}
+            ${p.isin || p.alta ? (tengo(p) ? '<span class="chip ok">Ya está en tu cartera</span>' : `<button class="btn pequeno" data-alta="${esc(cat.productos.indexOf(p))}">Añadir a mi cartera</button>`) : ''}
             ${p.fuente ? `<a class="btn pequeno" href="${esc(p.fuente)}" target="_blank" rel="noopener">Ficha</a>` : ''}
           </div>
         </div>`).join('')}</div>`;
@@ -809,6 +838,7 @@
       </article>
       <article class="tarjeta ancho"><h2>Recomendación por categoría <button class="btn pequeno" data-metodologia="1">¿Cómo se calcula?</button></h2>
         <div class="vista-senales">${['RV_DES', 'RV_EME', 'BONOS', 'REITS'].map(id => senal(d, id) ? `<div class="tarjeta-interior"><h3 style="margin-top:0">${esc(senal(d, id).nombre)}</h3>${htmlSenal(senal(d, id), false)}</div>` : '').join('') || '<p class="vacio">Aún no hay análisis. Se calcula cada día laborable a las 22:00.</p>'}</div></article>
+      ${tarjetaCripto(d)}
       <article class="tarjeta ancho">
         <h2>Comparador de productos</h2>
         <p class="suave">Candidatos para cada categoría de tu cartera, con datos verificados el ${fmtFecha(cat.verificado)}. Antes de comprar, busca el ISIN en Trade Republic para confirmar que está disponible y si admite plan de inversión. Es información para comparar, no una recomendación personalizada.</p>
@@ -819,6 +849,7 @@
       ${tarjetaIndicadores('Entorno de tipos de interés y bonos', ['BCE_DEPO', 'FED_TIPO', 'BONO10_EZ', 'BONO10_US', 'IPCA_EZ'], d,
         'Los tipos de interés influyen en la valoración de las bolsas y en el precio de los bonos que ya tienes.')}
     `;
+    if (pr.cripto && pr.cripto.grafico && pr.cripto.grafico.length) graficoLinea('g-btc', pr.cripto.grafico, 'Bitcoin (€)', v => fmtEur(v, 0));
     if (selIdx) {
       const r = indices.find(x => x.simbolo === selIdx) || {};
       graficoLinea('g-indice', pr.graficos[selIdx], r.nombre || selIdx, v => r.unidad === '€' ? fmtEur(v, 2) : fmtNum(v, 0));
@@ -828,8 +859,8 @@
       if (b) { estado.indiceSel = b.dataset.indice; pintar(); return; }
       const a = ev.target.closest('[data-alta]');
       if (a) {
-        const p = cat.productos.find(x => x.isin === a.dataset.alta);
-        modalActivo(null, { nombre: p.nombre, isin: p.isin, ticker: p.ticker, categoria: p.categoria, tipo: p.tipo, region: p.region, divisa: p.divisa });
+        const p = cat.productos[Number(a.dataset.alta)];
+        if (p) modalActivo(null, { nombre: p.nombre, isin: p.isin, ticker: p.ticker, categoria: p.categoria, tipo: p.tipo, region: p.region, divisa: p.divisa, simbolo_datos: p.simbolo_datos || '' });
       }
     };
   }
@@ -853,7 +884,7 @@
         </div>
         <div class="detalles">
           ${liq ? `<span>Saldo<b class="num">${fmtEur(p.participaciones)}</b></span>` : `
-          <span>Participaciones<b class="num">${fmtNum(p.participaciones, 4)}</b></span>
+          <span>${p.categoria === 'CRIPTO' ? 'Cantidad' : 'Participaciones'}<b class="num">${fmtNum(p.participaciones, p.categoria === 'CRIPTO' ? 8 : 4)}</b></span>
           <span>Precio medio<b class="num">${fmtEur(p.precio_medio, 4)}</b></span>
           <span>Precio actual<b class="num">${p.precio_actual ? fmtEur(p.precio_actual, 4) : '—'}</b></span>
           <span>Fecha precio<b>${fmtFecha(p.fecha_precio)}</b></span>`}
@@ -938,7 +969,7 @@
   }
 
   /* ================= PANTALLA 5 · ASESOR (Fase 5: perfil y simulador) ================= */
-  const ORDEN_SIM = ['RV_DES', 'RV_EME', 'ORO', 'BONOS', 'REITS', 'LIQUIDEZ'];
+  const ORDEN_SIM = ['RV_DES', 'RV_EME', 'ORO', 'BONOS', 'REITS', 'CRIPTO', 'LIQUIDEZ'];
   // Hipótesis de partida (rentabilidad media anual nominal en euros y volatilidad), editables.
   // Referencia: J.P. Morgan Long-Term Capital Market Assumptions 2026 (10-15 años), ajustadas a la baja para un inversor en euros.
   const HIPOTESIS = {
@@ -947,21 +978,25 @@
     ORO:      { r: 4.0, v: 15 },
     BONOS:    { r: 3.0, v: 4 },
     REITS:    { r: 6.0, v: 19 },
+    // Bitcoin: sin previsión institucional. Hipótesis prudente: la misma rentabilidad que la bolsa
+    // (sin suponer ninguna prima) y una volatilidad del 60 %, dentro del rango histórico (50-80 % anual).
+    CRIPTO:   { r: 6.5, v: 60 },
     LIQUIDEZ: { r: 2.5, v: 0.5 }
   };
   const CORRELACION = [
-    [1.00, 0.75, 0.10, 0.05, 0.70, 0.00],
-    [0.75, 1.00, 0.15, 0.00, 0.60, 0.00],
-    [0.10, 0.15, 1.00, 0.20, 0.15, 0.00],
-    [0.05, 0.00, 0.20, 1.00, 0.20, 0.10],
-    [0.70, 0.60, 0.15, 0.20, 1.00, 0.00],
-    [0.00, 0.00, 0.00, 0.10, 0.00, 1.00]
+    [1.00, 0.75, 0.10, 0.05, 0.70, 0.35, 0.00],
+    [0.75, 1.00, 0.15, 0.00, 0.60, 0.35, 0.00],
+    [0.10, 0.15, 1.00, 0.20, 0.15, 0.10, 0.00],
+    [0.05, 0.00, 0.20, 1.00, 0.20, 0.00, 0.10],
+    [0.70, 0.60, 0.15, 0.20, 1.00, 0.30, 0.00],
+    [0.35, 0.35, 0.10, 0.00, 0.30, 1.00, 0.00],
+    [0.00, 0.00, 0.00, 0.10, 0.00, 0.00, 1.00]
   ];
-  const PRUDENTE = { RV_DES: 35, RV_EME: 10, ORO: 15, BONOS: 30, REITS: 5, LIQUIDEZ: 5 };
+  const PRUDENTE = { RV_DES: 35, RV_EME: 10, ORO: 15, BONOS: 30, REITS: 5, CRIPTO: 0, LIQUIDEZ: 5 };
   // Escenarios de crisis hipotéticos (caídas aproximadas de pico a valle inspiradas en episodios reales)
   const CRISIS = {
-    gfc: { nombre: 'Gran crisis financiera (tipo 2008)', choque: { RV_DES: -45, RV_EME: -50, ORO: 5, BONOS: 5, REITS: -55, LIQUIDEZ: 0 } },
-    inflacion: { nombre: 'Inflación y subida de tipos (tipo 2022)', choque: { RV_DES: -15, RV_EME: -20, ORO: 0, BONOS: -12, REITS: -25, LIQUIDEZ: 0 } },
+    gfc: { nombre: 'Gran crisis financiera (tipo 2008)', choque: { RV_DES: -45, RV_EME: -50, ORO: 5, BONOS: 5, REITS: -55, CRIPTO: -75, LIQUIDEZ: 0 } },
+    inflacion: { nombre: 'Inflación y subida de tipos (tipo 2022)', choque: { RV_DES: -15, RV_EME: -20, ORO: 0, BONOS: -12, REITS: -25, CRIPTO: -65, LIQUIDEZ: 0 } },
     decada: { nombre: 'Década perdida en bolsa (tipo 2000-2010)', choque: null, decada: true }
   };
 
@@ -970,7 +1005,7 @@
     ORDEN_SIM.forEach(k => { p[k] = Number(cfg['obj_' + k]) || 0; });
     return p;
   }
-  const pesoBolsa = p => (p.RV_DES || 0) + (p.RV_EME || 0) + (p.REITS || 0);
+  const pesoBolsa = p => (p.RV_DES || 0) + (p.RV_EME || 0) + (p.REITS || 0) + (p.CRIPTO || 0);
   const caidaCrisis = p => ORDEN_SIM.reduce((s, k) => s + (p[k] || 0) / 100 * CRISIS.gfc.choque[k], 0);
 
   function evaluarPerfil(d) {
@@ -998,10 +1033,10 @@
       <p><strong>Recomendado: ${fmtEur(e.colchon, 0)}</strong> (${e.meses} meses × ${fmtEur(e.gastos, 0)} de gastos), en liquidez disponible y <strong>fuera de esta cartera</strong>.</p>
       <p class="suave">Ahora mismo no tienes ese colchón. Con ${fmtEur(Number(d.config.aportacion_mensual) || 0, 0)} al mes tardarías unos ${e.mesesAhorro || '—'} meses en reunirlo; una parte de las aportaciones extraordinarias que planeas para enero podría acelerarlo. Sin colchón, un imprevisto podría obligarte a vender inversiones en mal momento.</p>`;
     const textoVer = e.veredicto === 'alto'
-      ? `Tu cartera objetivo tiene un <strong>${fmtNum(e.bolsa, 0)} %</strong> en bolsa (incluidos REITs). Con ${e.anios} años hasta la jubilación y tolerancia ${e.tol.toLowerCase()}, la referencia orientativa sería en torno a un <strong>${fmtNum(e.ref, 0)} %</strong>. Es <strong>algo elevado</strong>.`
+      ? `Tu cartera objetivo tiene un <strong>${fmtNum(e.bolsa, 0)} %</strong> en activos de riesgo (bolsa, REITs y bitcoin). Con ${e.anios} años hasta la jubilación y tolerancia ${e.tol.toLowerCase()}, la referencia orientativa sería en torno a un <strong>${fmtNum(e.ref, 0)} %</strong>. Es <strong>algo elevado</strong>.`
       : e.veredicto === 'bajo'
-        ? `Tu cartera objetivo tiene un ${fmtNum(e.bolsa, 0)} % en bolsa, por debajo de la referencia orientativa (${fmtNum(e.ref, 0)} %). Es prudente, aunque puede crecer menos.`
-        : `Tu cartera objetivo tiene un ${fmtNum(e.bolsa, 0)} % en bolsa, en línea con la referencia orientativa (${fmtNum(e.ref, 0)} %).`;
+        ? `Tu cartera objetivo tiene un ${fmtNum(e.bolsa, 0)} % en activos de riesgo, por debajo de la referencia orientativa (${fmtNum(e.ref, 0)} %). Es prudente, aunque puede crecer menos.`
+        : `Tu cartera objetivo tiene un ${fmtNum(e.bolsa, 0)} % en activos de riesgo, en línea con la referencia orientativa (${fmtNum(e.ref, 0)} %).`;
     return `<article class="tarjeta ancho">
       <h2>Tu perfil inversor <button class="btn pequeno" id="btn-editar-perfil">Editar</button></h2>
       <div class="indicadores compacto">
@@ -1014,7 +1049,7 @@
       <h3>¿Encaja tu cartera con tu edad?</h3>
       <p>${textoVer}</p>
       <p>En una crisis como la de 2008, tu cartera objetivo podría caer en torno a un <strong>${fmtNum(-e.caida, 0)} %</strong> (por ejemplo, de 20.000 € a ${fmtEur(20000 * (1 + e.caida / 100), 0)}). Dijiste que ante una caída del 30 % aguantarías: estarías justo en ese límite.</p>
-      <p>Una alternativa más prudente (${fmtNum(pesoBolsa(PRUDENTE), 0)} % en bolsa, con más bonos) caería en torno a un ${fmtNum(-e.caidaPrudente, 0)} %. Puedes comparar ambas en el simulador de abajo.</p>
+      <p>Una alternativa más prudente (${fmtNum(pesoBolsa(PRUDENTE), 0)} % en activos de riesgo, sin bitcoin y con más bonos) caería en torno a un ${fmtNum(-e.caidaPrudente, 0)} %. Puedes comparar ambas en el simulador de abajo.</p>
       <p class="suave">Valoración analítica, no asesoramiento regulado. La referencia usa la regla práctica «110 menos la edad», ajustada a tu tolerancia; es una orientación, no una norma. La decisión es tuya: si quieres cambiar los pesos, hazlo en Ajustes.</p>
     </article>`;
   }
@@ -1053,7 +1088,7 @@
   function simular(par, pesos, hip, nSim) {
     const meses = par.anios * 12;
     const L = cholesky(CORRELACION);
-    const n = 6;
+    const n = ORDEN_SIM.length;
     const w = ORDEN_SIM.map(k => (pesos[k] || 0) / 100);
     const mu = ORDEN_SIM.map(k => { const h = hip[k]; return (Math.log(1 + h.r / 100) - Math.pow(h.v / 100, 2) / 2) / 12; });
     const sd = ORDEN_SIM.map(k => hip[k].v / 100 / Math.sqrt(12));
@@ -1158,7 +1193,7 @@
         }
         const r = ORDEN_SIM.reduce((s, k) => {
           let anual = hip[k].r;
-          if (conCrisis && c.decada && (k === 'RV_DES' || k === 'RV_EME' || k === 'REITS') && y >= anioCrisis && y < anioCrisis + 10) anual = 0;
+          if (conCrisis && c.decada && (k === 'RV_DES' || k === 'RV_EME' || k === 'REITS' || k === 'CRIPTO') && y >= anioCrisis && y < anioCrisis + 10) anual = 0;
           return s + (pesos[k] || 0) / 100 * (Math.pow(1 + anual / 100, 1 / 12) - 1);
         }, 0) - par.ter / 100 / 12;
         V *= (1 + r);
@@ -1197,7 +1232,7 @@
 
   function tarjetaSimulador(d) {
     const cfg = d.config;
-    const nombres = { RV_DES: 'RV desarrollados', RV_EME: 'RV emergentes', ORO: 'Oro', BONOS: 'Bonos', REITS: 'REITs', LIQUIDEZ: 'Liquidez' };
+    const nombres = { RV_DES: 'RV desarrollados', RV_EME: 'RV emergentes', ORO: 'Oro', BONOS: 'Bonos', REITS: 'REITs', CRIPTO: 'Bitcoin', LIQUIDEZ: 'Liquidez' };
     const obj = pesosObjetivo(cfg);
     return `<article class="tarjeta ancho" id="tarjeta-sim">
       <h2>Simulador de patrimonio</h2>
@@ -1225,7 +1260,7 @@
             <td class="der"><input id="h-r-${k}" class="mini" type="number" step="0.1" value="${HIPOTESIS[k].r}"></td>
             <td class="der"><input id="h-v-${k}" class="mini" type="number" step="0.5" min="0" value="${HIPOTESIS[k].v}"></td></tr>`).join('')}
           </tbody></table></div>
-          <p class="suave">Rentabilidades medias anuales en euros, antes de comisiones. Punto de partida: previsiones a 10-15 años de J.P. Morgan (Long-Term Capital Market Assumptions 2026: bolsa global 7,5 %, bonos agregados globales 5,3 %, en su moneda), ajustadas a la baja para un inversor en euros, porque los tipos de interés en euros son más bajos. La simulación usa colas gruesas para reflejar que las crisis son más frecuentes de lo que supone una campana normal. No son predicciones.</p>
+          <p class="suave">Rentabilidades medias anuales en euros, antes de comisiones. Punto de partida: previsiones a 10-15 años de J.P. Morgan (Long-Term Capital Market Assumptions 2026: bolsa global 7,5 %, bonos agregados globales 5,3 %, en su moneda), ajustadas a la baja para un inversor en euros, porque los tipos de interés en euros son más bajos. Bitcoin no tiene previsión institucional: se usa la misma rentabilidad que la bolsa, sin prima, y una volatilidad del 60 %. La simulación usa colas gruesas para reflejar que las crisis son más frecuentes de lo que supone una campana normal. No son predicciones.</p>
         </details>
         <button class="btn primario" type="submit">Simular</button>
       </form>
@@ -1476,8 +1511,8 @@
         const liq = a && a.categoria === 'LIQUIDEZ';
         $('#op-campos', cuerpo).innerHTML = (tipo === 'RENTA' || liq)
           ? `<label>Importe (€)<input name="importe" type="number" inputmode="decimal" min="0.01" step="0.01" required></label>`
-          : `<div class="doble"><label>Participaciones<input name="participaciones" type="number" inputmode="decimal" min="0.000001" step="any" required></label>
-             <label>Precio por participación (€)<input name="precio" type="number" inputmode="decimal" min="0.0001" step="any" required></label></div>
+          : `<div class="doble"><label>Participaciones<input name="participaciones" type="number" inputmode="decimal" min="0.00000001" step="any" required></label>
+             <label>${a && a.categoria === 'CRIPTO' ? 'Precio por unidad, p. ej. por 1 bitcoin (€)' : 'Precio por participación (€)'}<input name="precio" type="number" inputmode="decimal" min="0.0001" step="any" required></label></div>
              <p class="suave" id="op-total"></p>`;
         const calc = () => {
           const p = parseFloat(f.participaciones && f.participaciones.value), pr = parseFloat(f.precio && f.precio.value);
@@ -1584,7 +1619,7 @@
           <button class="btn" type="button" id="btn-estado">Comprobar estado del sistema</button>
           <button class="btn peligro" type="button" id="btn-desconectar">Olvidar este dispositivo</button>
         </div>
-        <p class="suave">Versión de la app: 1.7.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
+        <p class="suave">Versión de la app: 1.8.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
       </form>`, cuerpo => {
       const f = $('#f-ajustes', cuerpo);
       const suma = () => {
@@ -1822,7 +1857,7 @@
   function tarjetaValidacion(d) {
     const v = d.validacion;
     if (!v) return '';
-    const nombres = { ORO: 'Oro', RV_DES: 'RV desarrollados', RV_EME: 'RV emergentes', BONOS: 'Bonos', REITS: 'REITs' };
+    const nombres = { ORO: 'Oro', RV_DES: 'RV desarrollados', RV_EME: 'RV emergentes', BONOS: 'Bonos', REITS: 'REITs', CRIPTO: 'Bitcoin' };
     return `<article class="tarjeta ancho"><h2>¿Aciertan las señales?</h2>
       <p class="suave">Historial de decisiones y resultados: qué pasó con el precio 30 días después de cada evaluación del semáforo. Sirve para comprobar con honestidad si el motor aporta valor.</p>
       ${!v.disponible ? `<p class="vacio">Aún no hay señales con 30 días de antigüedad. Los primeros resultados estarán disponibles a partir del ${fmtFecha(v.disponible_desde)}.</p>` : `
