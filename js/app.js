@@ -936,8 +936,6 @@
 
       <article class="tarjeta ancho"><h2>Posiciones</h2><div class="posiciones">${posHtml}</div></article>
 
-      ${tarjetaDonde(d)}
-
       <article class="tarjeta"><h2>Distribución y desviaciones</h2>${c.total > 0 ? barrasCategorias(c.categorias, d.catalogos.umbral) : '<p class="vacio">Sin posiciones valoradas.</p>'}</article>
       <article class="tarjeta"><h2>Rebalanceo anual</h2>${rebHtml}</article>
 
@@ -947,7 +945,6 @@
 
       <article class="tarjeta ancho"><h2>Operaciones</h2>${opsHtml}</article>
     `;
-    enlazarDonde();
     el.onclick = ev => {
       const b = ev.target.closest('[data-accion]');
       if (!b) return;
@@ -1619,7 +1616,7 @@
           <button class="btn" type="button" id="btn-estado">Comprobar estado del sistema</button>
           <button class="btn peligro" type="button" id="btn-desconectar">Olvidar este dispositivo</button>
         </div>
-        <p class="suave">Versión de la app: 1.8.1 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
+        <p class="suave">Versión de la app: 1.8.2 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
       </form>`, cuerpo => {
       const f = $('#f-ajustes', cuerpo);
       const suma = () => {
