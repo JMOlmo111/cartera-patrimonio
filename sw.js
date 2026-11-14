@@ -3,7 +3,7 @@
    NUNCA guarda las respuestas del servidor (tus datos financieros).
    Estrategia: RED PRIMERO para los archivos de la app (siempre se usa la
    última versión publicada en GitHub) y copia guardada solo si no hay conexión. */
-const VERSION = 'cp-v1.2.1';
+const VERSION = 'cp-v1.2.2';
 const CARCASA = [
   './', './index.html', './css/estilos.css', './js/app.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',
