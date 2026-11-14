@@ -8,7 +8,7 @@
 
   const CLAVE_CONEXION = 'cp_conexion';
   const CLAVE_CACHE = 'cp_cache_resumen';
-  const TITULOS = { patrimonio: 'Mi patrimonio', oro: 'Oro', fondos: 'Fondos indexados', cartera: 'Mi cartera', informes: 'Asesor e informes' };
+  const TITULOS = { patrimonio: 'Mi patrimonio', oro: 'Oro', fondos: 'Fondos y cripto', cartera: 'Mi cartera', informes: 'Asesor e informes' };
 
   const estado = { conexion: null, datos: null, vista: 'patrimonio', graficos: {}, cargando: false, deCache: false };
 
@@ -1619,7 +1619,7 @@
           <button class="btn" type="button" id="btn-estado">Comprobar estado del sistema</button>
           <button class="btn peligro" type="button" id="btn-desconectar">Olvidar este dispositivo</button>
         </div>
-        <p class="suave">Versión de la app: 1.8.0 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
+        <p class="suave">Versión de la app: 1.8.1 · Servidor: ${esc(estado.datos ? estado.datos.app.version : '—')}</p>
       </form>`, cuerpo => {
       const f = $('#f-ajustes', cuerpo);
       const suma = () => {
